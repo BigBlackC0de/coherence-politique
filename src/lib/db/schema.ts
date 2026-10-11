@@ -48,6 +48,9 @@ export const politicians = sqliteTable(
     xHandle: text("x_handle"),
     role: text("role"),
     active: integer("active", { mode: "boolean" }).notNull().default(true),
+    /** Début / fin du mandat parlementaire en cours (ISO) — sert au calcul d'assiduité. */
+    mandateStart: text("mandate_start"),
+    mandateEnd: text("mandate_end"),
     hatvpUrl: text("hatvp_url"),
     rawJson: text("raw_json"),
   },
@@ -140,6 +143,46 @@ export interface ThemeDirection {
   weight: number;
 }
 
+/**
+ * Débat qui précède un scrutin, extrait du compte rendu officiel de la séance
+ * (présentation de l'amendement, avis, interventions, explications de vote),
+ * puis expliqué en langage courant par le modèle.
+ */
+export const scrutinDebates = sqliteTable("scrutin_debates", {
+  scrutinUid: text("scrutin_uid").primaryKey(),
+  source: text("source").notNull(), // an-cri | senat-cri
+  crRef: text("cr_ref").notNull(), // uid du compte rendu AN / fichier du jour Sénat
+  url: text("url"),
+  turns: text("turns", { mode: "json" }).$type<DebateTurn[]>().notNull(),
+  hash: text("hash").notNull(),
+  extractedAt: text("extracted_at").notNull(),
+  explanation: text("explanation", { mode: "json" }).$type<VoteExplanation>(),
+  explainModel: text("explain_model"),
+  explainedAt: text("explained_at"),
+});
+
+export interface DebateTurn {
+  speaker: string;
+  politicianId: string | null;
+  groupRef: string | null;
+  group: string | null; // sigle du groupe
+  role: "presidence" | "gouvernement" | "commission" | "parlementaire" | "amendement";
+  quality: string | null; // « rapporteure de la commission spéciale », « ministre délégué… »
+  text: string;
+}
+
+export interface VoteExplanation {
+  titre?: string;
+  enjeu: string;
+  siAdopte: string | null;
+  piegeQuestion?: string | null;
+  piege: string | null;
+  argumentsPour: string[];
+  argumentsContre: string[];
+  groupes: { groupRef: string; raison: string | null; citation: string | null; orateur: string | null; politicianId: string | null }[];
+  fiabilite: "bonne" | "partielle" | "faible";
+}
+
 /* ------------------------------------------------------------------ */
 /* Programmes et documents                                             */
 /* ------------------------------------------------------------------ */
@@ -181,16 +224,22 @@ export const documentAnalyses = sqliteTable(
 );
 
 /* ------------------------------------------------------------------ */
-/* Réseaux sociaux (X)                                                 */
+/* Prises de parole : interventions en séance, communiqués, messages X  */
 /* ------------------------------------------------------------------ */
 
 export const posts = sqliteTable(
   "posts",
   {
-    id: text("id").primaryKey(), // tweet id
-    handle: text("handle").notNull(),
+    id: text("id").primaryKey(), // tweet id | an-cri:<id_syceron> | senat-cri:<date>:<par> | rss:<hash>
+    handle: text("handle").notNull(), // compte X ou nom de l'orateur / du parti
     partyId: text("party_id"),
     politicianId: text("politician_id"),
+    /** tweet | qag | explication-vote | discussion-generale | motion | qosd | debat | communique */
+    kind: text("kind").notNull().default("tweet"),
+    /** Contexte : titre du point de l'ordre du jour, sujet de la question, titre du communiqué. */
+    title: text("title"),
+    chamber: text("chamber"), // AN | SENAT | null
+    sourceRef: text("source_ref"), // uid du compte rendu / URL du flux
     text: text("text").notNull(),
     createdAt: text("created_at").notNull(),
     url: text("url"),
@@ -198,10 +247,10 @@ export const posts = sqliteTable(
     reposts: integer("reposts").default(0),
     replies: integer("replies").default(0),
     views: integer("views").default(0),
-    source: text("source").notNull().default("x-api"), // x-api | import
+    source: text("source").notNull().default("x-api"), // x-api | import | an-cri | senat-cri | rss
     ingestedAt: text("ingested_at").notNull(),
   },
-  (t) => [index("posts_party_idx").on(t.partyId), index("posts_handle_idx").on(t.handle), index("posts_date_idx").on(t.createdAt)],
+  (t) => [index("posts_party_idx").on(t.partyId), index("posts_handle_idx").on(t.handle), index("posts_date_idx").on(t.createdAt), index("posts_politician_idx").on(t.politicianId), index("posts_kind_idx").on(t.kind)],
 );
 
 export const postAnalyses = sqliteTable("post_analyses", {
@@ -307,6 +356,8 @@ export const jobs = sqliteTable("jobs", {
   costUsd: real("cost_usd").notNull().default(0),
   startedAt: text("started_at").notNull(),
   finishedAt: text("finished_at"),
+  /** Processus qui exécute le job (serveur ou CLI) : un job n'est « orphelin » que si ce processus est mort. */
+  pid: integer("pid"),
 });
 
 export const settings = sqliteTable("settings", {
@@ -335,3 +386,148 @@ export const chatMessages = sqliteTable("chat_messages", {
   content: text("content").notNull(),
   createdAt: text("created_at").notNull(),
 });
+
+/* ------------------------------------------------------------------ */
+/* Présidentielle : candidats et fiches biographiques                  */
+/* ------------------------------------------------------------------ */
+
+/** Source d'un fait : toujours extérieure au candidat (presse, institution, justice…). */
+export interface CandidateSource {
+  url: string;
+  publisher: string; // nom du média / de l'institution
+  date: string | null; // date de publication (ISO ou « 2024-06 ») si connue
+  title?: string | null;
+}
+export interface CandidateFact {
+  text: string;
+  sources: CandidateSource[]; // au moins une
+}
+/** Étape d'une procédure judiciaire. */
+export type JusticeStage = "plainte" | "enquete" | "garde_a_vue" | "mise_en_examen" | "requisitions" | "non_lieu" | "appel" | "renvoi_proces" | "proces" | "condamnation" | "relaxe" | "classement_sans_suite" | "cassation" | "autre";
+/** État actuel d'une affaire, du point de vue de la personne mise en cause. */
+export type AffairStatus =
+  | "enquete_en_cours"
+  | "mise_en_examen"
+  | "renvoi_devant_tribunal"
+  | "proces_en_cours"
+  | "condamnation_non_definitive"
+  | "condamnation_definitive"
+  | "relaxe_non_definitive"
+  | "relaxe_definitive"
+  | "non_lieu_non_definitif"
+  | "non_lieu_definitif"
+  | "classement_sans_suite"
+  /** Décision rendue (condamnation, relaxe, non-lieu), mais aucun document officiel n'établit si elle est définitive ou si un recours est en cours. */
+  | "decision_finalite_non_etablie"
+  | "inconnu";
+/** Source d'une étape judiciaire, contrôlée sur le texte de la page (extrait littéral retrouvé). */
+export interface JusticeSource extends CandidateSource {
+  quote: string; // extrait littéral de la page qui établit l'étape
+}
+export interface CandidateJusticeStep {
+  date: string | null;
+  stage: JusticeStage;
+  jurisdiction: string | null;
+  text: string;
+  sources: JusticeSource[];
+}
+export interface CandidateAffair {
+  /** Cause en clair, ex. « Affaire de harcèlement et d'agressions sexuelles présumés ». */
+  title: string;
+  /** Qualification exacte des faits reprochés, telle qu'établie par les sources. */
+  charges: string;
+  charges_sources: JusticeSource[];
+  current_status: AffairStatus;
+  /** État actuel en langage simple, statut d'abord (« Renvoyé devant le tribunal correctionnel de Paris le … »). */
+  current_summary: string;
+  current_date: string | null;
+  current_jurisdiction: string | null;
+  /** false : l'état actuel n'est pas confirmé par une source récente vérifiée. */
+  current_confirmed: boolean;
+  /** Contradiction entre sources sur l'état actuel, le cas échéant. */
+  contradiction: string | null;
+  steps: CandidateJusticeStep[]; // chronologie, de la plus ancienne à la plus récente
+  /** Réaction de la personne rapportée par la presse (« il conteste les faits »), facultative. */
+  response: { text: string; sources: CandidateSource[] } | null;
+}
+export interface CandidateMandate {
+  role: string;
+  institution: string;
+  start: string | null;
+  end: string | null; // null = en cours
+  sources: CandidateSource[];
+}
+export interface CandidateSelfVsSources {
+  topic: string;
+  candidate_says: { text: string; sources: CandidateSource[] };
+  sources_show: { text: string; sources: CandidateSource[] };
+}
+/** Fiche « personnage » : mêmes rubriques, dans le même ordre, pour tous les candidats. */
+export interface CandidateProfile {
+  summary: CandidateFact;
+  identity: CandidateFact[];
+  family: CandidateFact[];
+  education: CandidateFact[];
+  career: CandidateFact[];
+  political: CandidateFact[];
+  mandates: CandidateMandate[];
+  assets: CandidateFact[];
+  justice: CandidateAffair[];
+  /** Date de la dernière vérification de la rubrique justice (passe dédiée). */
+  justice_checked_at?: string;
+  positions: CandidateFact[];
+  self_vs_sources: CandidateSelfVsSources[];
+  /** Points que la recherche n'a pas permis d'établir (transparence). */
+  gaps: string[];
+}
+export interface CandidatePhoto {
+  url: string; // vignette upload.wikimedia.org
+  fullUrl: string;
+  author: string;
+  license: string;
+  licenseUrl: string | null;
+  sourcePage: string; // page du fichier sur Wikimedia Commons
+}
+
+export const candidates = sqliteTable(
+  "candidates",
+  {
+    id: text("id").primaryKey(), // slug : prenom-nom
+    fullName: text("full_name").notNull(),
+    firstName: text("first_name").notNull(),
+    lastName: text("last_name").notNull(),
+    /** Parti présent dans Cohérence-Politique (table parties), sinon null. */
+    partyId: text("party_id"),
+    /** Parti / mouvement / soutien tel qu'affiché (ex. « Divers gauche », « sans étiquette »). */
+    partyLabel: text("party_label"),
+    /** declare | pressenti | officiel (500 parrainages validés par le Conseil constitutionnel) | retire */
+    status: text("status").notNull().default("pressenti"),
+    /** "job" (recherche web) ou "admin" (posé à la main : le job ne le modifie plus). */
+    statusSetBy: text("status_set_by").notNull().default("job"),
+    statusSource: text("status_source", { mode: "json" }).$type<CandidateSource | null>(),
+    declaredAt: text("declared_at"),
+    birthDate: text("birth_date"), // YYYY-MM-DD
+    birthPlace: text("birth_place"),
+    tagline: text("tagline"), // une ligne factuelle
+    wikipediaTitle: text("wikipedia_title"),
+    officialSite: text("official_site"), // pour exclure ses propres sites des sources
+    photo: text("photo", { mode: "json" }).$type<CandidatePhoto | null>(),
+    profile: text("profile", { mode: "json" }).$type<CandidateProfile | null>(),
+    profileModel: text("profile_model"),
+    profileAt: text("profile_at"),
+    /**
+     * Périmètre : Cohérence-Politique présente les candidats des partis qui ont au moins un député en exercice.
+     * "in" | "out" | null (pas encore vérifié). "out" : masqué des pages, jamais supprimé (réversible).
+     */
+    scope: text("scope"),
+    scopeReason: text("scope_reason"),
+    scopeSources: text("scope_sources", { mode: "json" }).$type<CandidateSource[]>(),
+    scopeSetBy: text("scope_set_by"), // "job" | "admin"
+    scopeCheckedAt: text("scope_checked_at"),
+    /** Faits/sources écartés à la validation (sans URL, source non indépendante, lien mort). */
+    rejected: text("rejected", { mode: "json" }).$type<string[]>(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [index("candidates_status_idx").on(t.status)],
+);

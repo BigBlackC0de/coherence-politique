@@ -1,11 +1,11 @@
 /**
- * Taxonomie des thèmes politiques d'Apollon.
+ * Taxonomie des thèmes politiques de Cohérence-Politique.
  *
  * Chaque thème est un AXE orienté de -1 à +1 :
  *   -1 = pôle "gauche" du thème (poleLeft)
  *   +1 = pôle "droite" du thème (poleRight)
  * Cette orientation est purement conventionnelle (elle permet de comparer
- * programmes, votes et tweets sur la même échelle) et n'est pas un jugement.
+ * programmes, votes et prises de parole sur la même échelle) et n'est pas un jugement.
  *
  * `group` sert à construire la boussole 2D :
  *   eco      → axe horizontal (économie / social)

@@ -72,14 +72,14 @@ export function JobsPanel({ kinds, claudeReady, engine }: { kinds: KindInfo[]; c
       <div className="flex flex-wrap gap-3 items-center text-sm">
         <label className="flex items-center gap-1">
           Budget max par job
-          <input type="number" value={budget} onChange={(e) => setBudget(Number(e.target.value))} className="w-20 border border-border rounded px-2 py-1 bg-surface" min={1} /> $
+          <input type="number" value={budget} onChange={(e) => setBudget(Number(e.target.value))} className="input w-20 !py-1" min={1} /> $
         </label>
         <label className="flex items-center gap-1">
           Limite (test)
-          <input type="number" value={limit} onChange={(e) => setLimit(e.target.value)} placeholder="ex. 100" className="w-24 border border-border rounded px-2 py-1 bg-surface" />
+          <input type="number" value={limit} onChange={(e) => setLimit(e.target.value)} placeholder="ex. 100" className="input w-24 !py-1" />
         </label>
         {!claudeReady && <span className="text-warn text-xs">{engine === "claude-code" ? "Claude Code introuvable : installez-le et connectez-vous (`claude auth login`)." : "Clé API absente : renseignez ANTHROPIC_API_KEY dans .env."}</span>}
-        {engine === "claude-code" && claudeReady && <span className="text-xs text-ink-3">Les coûts affichés sont des équivalents : rien n'est facturé, l'usage est compté sur votre abonnement Claude.</span>}
+        {engine === "claude-code" && claudeReady && <span className="text-xs text-ink-3">Les coûts affichés sont des équivalents : rien n&apos;est facturé, l&apos;usage est compté sur votre abonnement Claude.</span>}
         {error && <span className="text-bad text-xs">{error}</span>}
       </div>
       <div className="grid md:grid-cols-2 gap-2">
@@ -90,7 +90,7 @@ export function JobsPanel({ kinds, claudeReady, engine }: { kinds: KindInfo[]; c
               <div className="flex-1 min-w-0">
                 <div className="font-medium text-sm flex items-center gap-2">
                   {k.label}
-                  {k.claude && <span className="text-[10px] rounded bg-accent/15 text-accent-ink px-1">Claude</span>}
+                  {k.claude && <span className="text-[10px] rounded bg-accent/15 text-accent-ink px-1">IA</span>}
                 </div>
                 <div className="text-xs text-ink-3 mt-0.5">{k.desc}</div>
                 {running && (
@@ -103,11 +103,11 @@ export function JobsPanel({ kinds, claudeReady, engine }: { kinds: KindInfo[]; c
                 )}
               </div>
               {running ? (
-                <button onClick={() => cancel(running.id)} className="text-xs rounded border border-border px-2 py-1 hover:border-bad hover:text-bad">
+                <button onClick={() => cancel(running.id)} className="btn-secondary !text-xs !py-1 !px-2 hover:!border-bad hover:!text-bad">
                   Arrêter
                 </button>
               ) : (
-                <button onClick={() => launch(k.id)} className="text-xs rounded bg-ink text-bg px-2.5 py-1">
+                <button onClick={() => launch(k.id)} className="btn-primary !text-xs !py-1 !px-2.5">
                   Lancer
                 </button>
               )}

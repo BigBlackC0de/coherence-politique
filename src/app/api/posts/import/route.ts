@@ -1,7 +1,10 @@
 import { NextRequest } from "next/server";
 import { importPosts } from "@/lib/claude/posts";
+import { assertAdmin } from "@/lib/auth";
 
 export async function POST(req: NextRequest) {
+  const denied = await assertAdmin();
+  if (denied) return denied;
   const b = (await req.json()) as { partyId?: string; handle?: string; raw?: string };
   if (!b.handle || !b.raw) return Response.json({ error: "handle et contenu requis" }, { status: 400 });
   const handle = b.handle.replace(/^@/, "");

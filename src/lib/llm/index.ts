@@ -12,12 +12,12 @@ import type { JobContext } from "../jobs";
  * Couche unique d'appel au modèle. Deux moteurs :
  *  - "api"         : SDK Anthropic (clé API, facturation à l'usage)
  *  - "claude-code" : binaire `claude -p` (abonnement Claude du compte connecté)
- * Choix : APOLLON_ENGINE=api|claude-code|auto (auto = clé API si présente, sinon Claude Code).
+ * Choix : COHERENCE_ENGINE=api|claude-code|auto (auto = clé API si présente, sinon Claude Code).
  */
 export type Engine = "api" | "claude-code";
 
 export function engine(): Engine {
-  const e = (process.env.APOLLON_ENGINE ?? "auto").toLowerCase();
+  const e = (process.env.COHERENCE_ENGINE ?? "auto").toLowerCase();
   if (e === "api") return "api";
   if (e === "claude-code") return "claude-code";
   if (process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN) return "api";
@@ -31,7 +31,7 @@ export function engineInfo() {
 }
 
 export function modelFor(kind: "main" | "bulk"): string {
-  if (engine() === "claude-code") return (kind === "main" ? process.env.APOLLON_CC_MODEL : process.env.APOLLON_CC_MODEL_BULK) ?? process.env.APOLLON_CC_MODEL ?? "opus";
+  if (engine() === "claude-code") return (kind === "main" ? process.env.COHERENCE_CC_MODEL : process.env.COHERENCE_CC_MODEL_BULK) ?? process.env.COHERENCE_CC_MODEL ?? "opus";
   return kind === "main" ? MODEL : MODEL_BULK;
 }
 
@@ -50,6 +50,8 @@ export interface LlmRequest<T> {
   /** Document texte long. */
   textDoc?: { text: string; title: string };
   ctx?: JobContext;
+  /** Moteur Claude Code : nombre de tours d'outils autorisés (défaut 20 avec le web). À relever pour les recherches longues. */
+  maxTurns?: number;
 }
 
 export interface LlmResult<T> {
@@ -125,7 +127,7 @@ async function llmClaudeCode<T>(req: LlmRequest<T>): Promise<LlmResult<T>> {
   let maxTurns = 4;
   if (req.tools?.includes("web")) {
     tools.push("WebSearch", "WebFetch");
-    maxTurns = 20;
+    maxTurns = req.maxTurns ?? 20;
   }
   if (req.pdf) {
     const file = path.join(docsDir(), `${crypto.createHash("sha1").update(req.pdf.base64.slice(0, 5000) + req.pdf.base64.length).digest("hex").slice(0, 16)}.pdf`);

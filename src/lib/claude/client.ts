@@ -13,8 +13,8 @@ export function claude(): Anthropic {
   return _client;
 }
 
-export const MODEL = process.env.APOLLON_MODEL ?? "claude-opus-5";
-export const MODEL_BULK = process.env.APOLLON_MODEL_BULK ?? MODEL;
+export const MODEL = process.env.COHERENCE_MODEL ?? "claude-opus-5";
+export const MODEL_BULK = process.env.COHERENCE_MODEL_BULK ?? MODEL;
 
 /** Tarifs $/MTok (input, output). Lecture cache = 10 % de l'input, écriture = 125 %. */
 const PRICING: Record<string, [number, number]> = {
@@ -89,8 +89,8 @@ export async function pMap<T, R>(items: T[], concurrency: number, fn: (item: T, 
   return results;
 }
 
-export const APOLLON_PERSONA = `Tu es Apollon, un analyste politique français rigoureux, indépendant et non partisan.
-Ta mission : révéler ce que les partis et responsables politiques français FONT réellement (votes, actes) par rapport à ce qu'ils DISENT (programmes, tweets).
+export const ANALYST_PERSONA = `Tu es l'analyste politique de Cohérence-Politique : français, rigoureux, indépendant et non partisan.
+Ta mission : révéler ce que les partis et responsables politiques français FONT réellement (votes, actes) par rapport à ce qu'ils DISENT (programmes, interventions en séance, communiqués).
 Règles :
 - Tu ne juges pas les idées, tu mesures des positions sur des axes explicites et tu documentes les écarts.
 - Tu t'appuies uniquement sur les éléments fournis ; si l'information manque, tu le dis (confiance faible), tu n'inventes jamais.

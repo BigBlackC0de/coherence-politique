@@ -1,7 +1,7 @@
 import { sql, inArray } from "drizzle-orm";
 import { getDb, nowIso, schema } from "../db";
 import { themesPromptBlock } from "../config/themes";
-import { APOLLON_PERSONA, pMap } from "./client";
+import { ANALYST_PERSONA, pMap } from "./client";
 import { llm, modelFor, engine } from "../llm";
 import { ScrutinBatchOutput } from "./schemas";
 import type { JobContext } from "../jobs";
@@ -14,7 +14,7 @@ import { computePartyScores } from "../analysis/scores";
  */
 const BATCH = 25;
 
-const SYSTEM = `${APOLLON_PERSONA}
+const SYSTEM = `${ANALYST_PERSONA}
 
 Tâche : classifier des scrutins parlementaires français (Assemblée nationale ou Sénat) selon la taxonomie ci-dessous.
 

@@ -1,8 +1,11 @@
 import { NextRequest } from "next/server";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
+import { assertAdmin } from "@/lib/auth";
 
 export async function PUT(req: NextRequest, ctx: RouteContext<"/api/parties/[id]/handles">) {
+  const denied = await assertAdmin();
+  if (denied) return denied;
   const { id } = await ctx.params;
   const b = (await req.json()) as { handles?: string[] };
   if (!Array.isArray(b.handles)) return Response.json({ error: "handles requis" }, { status: 400 });

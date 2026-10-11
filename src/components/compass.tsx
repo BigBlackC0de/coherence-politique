@@ -32,11 +32,11 @@ export function Compass({ parties, size = 560 }: { parties: CompassParty[]; size
     <div className="w-full">
       <div className="flex flex-wrap items-center gap-2 mb-2 text-xs">
         {(["both", "voted", "declared"] as const).map((m) => (
-          <button key={m} onClick={() => setMode(m)} className={`px-2.5 py-1 rounded-full border ${mode === m ? "bg-ink text-bg border-ink" : "border-border text-ink-2 hover:border-ink"}`}>
-            {m === "both" ? "Dire et faire" : m === "voted" ? "Votes seulement" : "Programmes seulement"}
+          <button key={m} onClick={() => setMode(m)} className={`pill ${mode === m ? "pill-active" : ""}`}>
+            {m === "both" ? "Ce qu'ils disent et ce qu'ils votent" : m === "voted" ? "Seulement ce qu'ils votent" : "Seulement ce qu'ils disent"}
           </button>
         ))}
-        <span className="ml-auto text-ink-3">anneau = programme · disque = votes · trait = écart</span>
+        <span className="ml-auto text-ink-3">rond vide = ce qu&apos;il dit · rond plein = ce qu&apos;il vote · trait = l&apos;écart</span>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto max-w-[640px] mx-auto block" role="img" aria-label="Boussole politique des partis">
         <defs>
@@ -56,16 +56,16 @@ export function Compass({ parties, size = 560 }: { parties: CompassParty[]; size
         <line x1={pad} y1={sy(0)} x2={W - pad} y2={sy(0)} stroke="var(--ink-3)" strokeWidth={1} />
         {/* axis labels */}
         <text x={pad + 4} y={sy(0) - 6} fontSize={11} fill="var(--ink-3)">
-          ← État, redistribution
+          ← Plus d&apos;État, plus de partage
         </text>
         <text x={W - pad - 4} y={sy(0) - 6} fontSize={11} fill="var(--ink-3)" textAnchor="end">
-          Marché, baisse d&apos;impôts →
+          Plus de marché, moins d&apos;impôts →
         </text>
         <text x={sx(0) + 6} y={pad + 14} fontSize={11} fill="var(--ink-3)">
-          ↑ Ordre, souveraineté, restriction
+          ↑ Ordre, frontières, autorité
         </text>
         <text x={sx(0) + 6} y={H - pad - 6} fontSize={11} fill="var(--ink-3)">
-          ↓ Ouverture, progressisme, Europe
+          ↓ Ouverture, libertés, Europe
         </text>
         <g clipPath="url(#plot)">
           {shown.map((p) => {
@@ -98,11 +98,11 @@ export function Compass({ parties, size = 560 }: { parties: CompassParty[]; size
             <Link href={`/partis/${p.id}`} className="font-medium text-ink underline">
               {p.name}
             </Link>{" "}
-            — programme ({f(p.declared.x)}, {f(p.declared.y)}) · votes ({f(p.voted.x)}, {f(p.voted.y)})
+            — ce qu&apos;il dit ({f(p.declared.x)}, {f(p.declared.y)}) · ce qu&apos;il vote ({f(p.voted.x)}, {f(p.voted.y)})
           </div>
         );
       })()}
-      {!shown.length && <p className="text-sm text-ink-3 text-center mt-2">Aucune position calculée : lancez la classification des scrutins et l&apos;analyse des programmes depuis « Données &amp; jobs ».</p>}
+      {!shown.length && <p className="text-sm text-ink-3 text-center mt-2">Les positions des partis ne sont pas encore calculées.</p>}
     </div>
   );
 }

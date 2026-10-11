@@ -1,8 +1,11 @@
 import { NextRequest } from "next/server";
 import { redirect } from "next/navigation";
 import { exchangeCode } from "@/lib/x/client";
+import { assertAdmin } from "@/lib/auth";
 
 export async function GET(req: NextRequest) {
+  const denied = await assertAdmin();
+  if (denied) return denied;
   const code = req.nextUrl.searchParams.get("code");
   const state = req.nextUrl.searchParams.get("state");
   const err = req.nextUrl.searchParams.get("error");

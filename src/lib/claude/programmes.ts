@@ -2,10 +2,11 @@ import crypto from "node:crypto";
 import { eq, and } from "drizzle-orm";
 import { getDb, nowIso, schema } from "../db";
 import { themesPromptBlock } from "../config/themes";
-import { APOLLON_PERSONA } from "./client";
+import { ANALYST_PERSONA } from "./client";
 import { llm, modelFor, engine } from "../llm";
 import { DiscoveredSources, ProgrammeAnalysis } from "./schemas";
 import type { JobContext } from "../jobs";
+import { extractText, getDocumentProxy } from "unpdf";
 
 /**
  * Programmes politiques :
@@ -38,7 +39,7 @@ Nous sommes en ${year}. Cherche en priorité :
 Privilégie les PDF complets et les pages officielles hébergées par le parti. Évite les articles de presse, Wikipédia, et les sites tiers.
 Donne pour chaque source : URL exacte, titre, type, s'il s'agit d'un PDF, si elle est officielle, période visée, et pourquoi tu la retiens. Maximum 4 sources, les plus complètes d'abord. Termine par la liste des URL retenues, une par ligne.`;
 
-    const search = await llm({ task: "discover-programmes", system: APOLLON_PERSONA, prompt, tools: ["web"], model: "main", effort: "medium", ctx });
+    const search = await llm({ task: "discover-programmes", system: ANALYST_PERSONA, prompt, tools: ["web"], model: "main", effort: "medium", ctx });
     if (!search.text) {
       ctx.log(`${p.shortName} : recherche sans résultat (${search.error ?? "vide"})`);
       ctx.setProgress(++i, parties.length);
@@ -109,7 +110,11 @@ export async function fetchDocument(docId: number, log?: (m: string) => void) {
   const doc = db.select().from(schema.documents).where(eq(schema.documents.id, docId)).get();
   if (!doc?.url) return;
   try {
-    const res = await fetch(doc.url, { headers: { "user-agent": "Mozilla/5.0 (compatible; Apollon/0.1; analyse citoyenne)" }, redirect: "follow" });
+    // User-agent de navigateur : plusieurs sites de partis refusent les agents « bot » déclarés (403).
+    const res = await fetch(doc.url, {
+      headers: { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36", accept: "text/html,application/pdf,application/xhtml+xml,*/*;q=0.8", "accept-language": "fr-FR,fr;q=0.9" },
+      redirect: "follow",
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const mime = (res.headers.get("content-type") ?? "").split(";")[0].trim();
     const buf = Buffer.from(await res.arrayBuffer());
@@ -142,7 +147,7 @@ const sha = (b: Buffer) => crypto.createHash("sha256").update(b).digest("hex");
 /* 3. Analyse                                                          */
 /* ------------------------------------------------------------------ */
 
-const SYSTEM_ANALYSE = `${APOLLON_PERSONA}
+const SYSTEM_ANALYSE = `${ANALYST_PERSONA}
 
 Tâche : analyser un programme / document de fond d'un parti politique français et le positionner, thème par thème, sur les axes suivants.
 
@@ -157,6 +162,26 @@ Consignes :
 - Si le document n'est pas un programme du parti indiqué (page d'accueil, article), mets party_confirmed=false et reste prudent.
 - Réponds uniquement avec le JSON demandé.`;
 
+/**
+ * Texte d’un PDF (extraction locale, sans modèle). Les programmes sont souvent des PDF
+ * graphiques de 20–40 Mo : le texte brut fait quelques centaines de Ko et se lit en entier.
+ * Retourne null si le PDF est une image scannée (pas de couche texte).
+ */
+export async function pdfToText(base64: string): Promise<{ text: string; pages: number } | null> {
+  try {
+    const pdf = await getDocumentProxy(new Uint8Array(Buffer.from(base64, "base64")));
+    const { totalPages, text } = await extractText(pdf, { mergePages: true });
+    const clean = (text as string)
+      .replace(/[ \t]+/g, " ")
+      .replace(/\s*\n\s*/g, "\n")
+      .trim();
+    if (clean.length < 1500) return null;
+    return { text: clean, pages: totalPages };
+  } catch {
+    return null;
+  }
+}
+
 export async function analyzeDocument(ctx: JobContext, docId: number) {
   const db = getDb();
   const doc = db.select().from(schema.documents).where(eq(schema.documents.id, docId)).get();
@@ -165,6 +190,20 @@ export async function analyzeDocument(ctx: JobContext, docId: number) {
   if (!doc.pdfBase64 && !doc.text) return;
   ctx.log(`Analyse : ${doc.title}`);
   const model = modelFor("main");
+  // PDF : on extrait le texte localement et on le fournit en entier au modèle (fiable quel que soit le moteur).
+  // Si le PDF n’a pas de couche texte (scan), on laisse le modèle lire le PDF lui-même.
+  let textDoc: { text: string; title: string } | undefined = !doc.pdfBase64 && doc.text ? { text: doc.text, title: doc.title } : undefined;
+  let pdf: { base64: string; title: string } | undefined;
+  if (doc.pdfBase64) {
+    const extracted = await pdfToText(doc.pdfBase64);
+    if (extracted) {
+      textDoc = { text: extracted.text, title: doc.title };
+      ctx.log(`${doc.title} : texte extrait du PDF (${extracted.pages} pages, ${(extracted.text.length / 1000).toFixed(0)} k caractères)`);
+    } else {
+      pdf = { base64: doc.pdfBase64, title: doc.title };
+      ctx.log(`${doc.title} : PDF sans couche texte, lecture directe par le modèle`);
+    }
+  }
   const res = await llm({
     task: "analyze-programme",
     system: SYSTEM_ANALYSE,
@@ -173,8 +212,8 @@ export async function analyzeDocument(ctx: JobContext, docId: number) {
     model: "main",
     effort: "high",
     maxTokens: 32000,
-    pdf: doc.pdfBase64 ? { base64: doc.pdfBase64, title: doc.title } : undefined,
-    textDoc: !doc.pdfBase64 && doc.text ? { text: doc.text, title: doc.title } : undefined,
+    pdf,
+    textDoc,
     ctx,
   });
   const parsed = res.output;
@@ -201,7 +240,7 @@ export async function analyzeDocument(ctx: JobContext, docId: number) {
     .set({
       status: "analyzed",
       title: parsed.party_confirmed ? doc.title : `${doc.title} [non confirmé comme programme]`,
-      error: parsed.party_confirmed ? null : "Claude n'a pas confirmé qu'il s'agit d'un programme officiel du parti : confiance réduite.",
+      error: parsed.party_confirmed ? null : "Cohérence-Politique n'a pas confirmé qu'il s'agit d'un programme officiel du parti : confiance réduite.",
     })
     .where(eq(schema.documents.id, docId))
     .run();

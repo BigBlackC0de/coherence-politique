@@ -1,20 +1,21 @@
 import { and, eq } from "drizzle-orm";
 import { getDb, getSqlite, nowIso, schema } from "../db";
 import { THEMES, THEME_BY_ID } from "../config/themes";
-import { APOLLON_PERSONA, pMap } from "./client";
+import { ANALYST_PERSONA, pMap } from "./client";
 import { llm, modelFor, engine } from "../llm";
 import { CoherenceSynthesis } from "./schemas";
 import type { JobContext } from "../jobs";
 import type { EvidenceItem } from "../db/schema";
+import { KIND_LABEL } from "../ingest/cri-an";
 
 /**
  * Synthèse de cohérence « dire / faire » pour chaque parti × thème :
- * programme (déclaré) vs votes (fait) vs tweets, avec verdict et preuves.
+ * programme (déclaré) vs votes (fait) vs prises de parole, avec verdict et preuves.
  */
 
-const SYSTEM = `${APOLLON_PERSONA}
+const SYSTEM = `${ANALYST_PERSONA}
 
-Tâche : pour un parti et un thème donnés, confronter ce que le parti DÉCLARE (programme, tweets) à ce qu'il VOTE au Parlement, et rendre un verdict de cohérence.
+Tâche : pour un parti et un thème donnés, confronter ce que le parti DÉCLARE (programme, interventions en séance, communiqués, messages X) à ce qu'il VOTE au Parlement, et rendre un verdict de cohérence.
 
 Verdicts :
 - coherent : les votes vont dans le sens des engagements ;
@@ -30,16 +31,34 @@ Règles :
 - Rédige en français, pour un citoyen, sans jargon, 4 à 8 phrases.
 - Réponds uniquement avec le JSON demandé.`;
 
+/**
+ * Cellules dont le verdict « insuffisant » a été confirmé alors que programme ET votes étaient disponibles :
+ * on ne les refait plus automatiquement (sinon elles reviendraient à chaque lancement).
+ */
+const CONFIRMED_KEY = "synthesize:insuffisant-confirme";
+export function confirmedInsufficient(): Set<string> {
+  const r = getSqlite().prepare(`SELECT value FROM settings WHERE key = ?`).get(CONFIRMED_KEY) as { value: string } | undefined;
+  return new Set(r ? (JSON.parse(r.value) as string[]) : []);
+}
+function saveConfirmed(set: Set<string>) {
+  getSqlite()
+    .prepare(`INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`)
+    .run(CONFIRMED_KEY, JSON.stringify([...set]), nowIso());
+}
+
 export async function synthesizeCoherence(ctx: JobContext, opts?: { partyIds?: string[]; themes?: string[]; force?: boolean }) {
   const db = getDb();
   const sqlite = getSqlite();
   const parties = db.select().from(schema.parties).all().filter((p) => !opts?.partyIds || opts.partyIds.includes(p.id));
   const themes = THEMES.filter((t) => !opts?.themes || opts.themes.includes(t.id));
   const cells: { partyId: string; theme: string }[] = [];
+  const confirmed = confirmedInsufficient();
   for (const p of parties) for (const t of themes) {
     const s = db.select().from(schema.partyThemeScores).where(and(eq(schema.partyThemeScores.partyId, p.id), eq(schema.partyThemeScores.theme, t.id))).get();
     if (!s) continue;
-    if (!opts?.force && s.narrative) continue;
+    // Un verdict « insuffisant » rédigé avant que programme ET votes soient disponibles est périmé : on le refait.
+    const stale = s.verdict === "insuffisant" && s.declaredStance !== null && s.votedStance !== null && !confirmed.has(`${p.id}|${t.id}`);
+    if (!opts?.force && s.narrative && !stale) continue;
     if (s.votedN === 0 && s.declaredStance === null && s.postsN === 0) continue;
     cells.push({ partyId: p.id, theme: t.id });
   }
@@ -63,8 +82,8 @@ export async function synthesizeCoherence(ctx: JobContext, opts?: { partyIds?: s
       )
       .all(cell.partyId, cell.theme, `%"${cell.theme}"%`) as { uid: string; date: string; title: string; chamber: string; sort: string | null; summary: string; salience: number; themes: string; position: string; pour: number; contre: number; abstentions: number; nonVotants: number }[];
     const tweets = sqlite
-      .prepare(`SELECT p.handle, p.created_at AS createdAt, p.text FROM post_analyses pa JOIN posts p ON p.id = pa.post_id WHERE p.party_id = ? AND pa.themes LIKE ? ORDER BY p.created_at DESC LIMIT 12`)
-      .all(cell.partyId, `%"${cell.theme}"%`) as { handle: string; createdAt: string; text: string }[];
+      .prepare(`SELECT p.handle, p.kind, p.title, p.created_at AS createdAt, p.text FROM post_analyses pa JOIN posts p ON p.id = pa.post_id WHERE p.party_id = ? AND pa.themes LIKE ? ORDER BY p.created_at DESC LIMIT 12`)
+      .all(cell.partyId, `%"${cell.theme}"%`) as { handle: string; kind: string; title: string | null; createdAt: string; text: string }[];
 
     const prompt = `PARTI : ${party.name} (${party.shortName}) — ${party.family}${party.notes ? `\nNote : ${party.notes}` : ""}
 THÈME : ${theme.label}
@@ -72,7 +91,7 @@ Axe : -1 = ${theme.poleLeft} | +1 = ${theme.poleRight}
 
 == CE QUE LE PARTI DÉCLARE ==
 ${docs.length ? docs.map((d) => `Source « ${d.title} » — stance ${d.stance.toFixed(2)} (confiance ${d.confidence.toFixed(2)})\n${d.summary}\nMesures : ${(JSON.parse(d.measures) as string[]).join(" ; ")}\nCitations : ${(JSON.parse(d.quotes) as string[]).map((q) => `« ${q} »`).join(" ")}`).join("\n\n") : "(aucun programme analysé pour ce thème)"}
-${tweets.length ? `\nTweets récents sur le thème :\n${tweets.map((t) => `- @${t.handle} ${t.createdAt.slice(0, 10)} : ${t.text.replace(/\s+/g, " ").slice(0, 280)}`).join("\n")}` : ""}
+${tweets.length ? `\nPrises de parole récentes sur le thème (séance publique, communiqués, X) :\n${tweets.map((t) => `- ${t.kind === "tweet" ? `@${t.handle}` : t.handle} (${(KIND_LABEL[t.kind] ?? t.kind).toLowerCase()}${t.title ? `, ${t.title.slice(0, 80)}` : ""}) ${t.createdAt.slice(0, 10)} : ${t.text.replace(/\s+/g, " ").slice(0, 400)}`).join("\n")}` : ""}
 
 == CE QUE LE PARTI VOTE ==
 Position votée calculée : ${score.votedStance != null ? score.votedStance.toFixed(2) : "n/a"} sur ${score.votedN} votes de groupe à l'Assemblée${score.senatStance != null ? ` ; Sénat : ${score.senatStance.toFixed(2)} sur ${score.senatN} votes` : ""}.
@@ -99,6 +118,10 @@ Rends ton verdict et ton analyse.`;
         .set({ narrative: out.narrative, verdict: out.verdict, evidence: merged, updatedAt: nowIso() })
         .where(and(eq(schema.partyThemeScores.partyId, cell.partyId), eq(schema.partyThemeScores.theme, cell.theme)))
         .run();
+      const key = `${cell.partyId}|${cell.theme}`;
+      if (out.verdict === "insuffisant" && score.declaredStance !== null && score.votedStance !== null) confirmed.add(key);
+      else confirmed.delete(key);
+      saveConfirmed(confirmed);
     } else ctx.log(`${party.shortName} × ${theme.label} : ${res.error ?? "pas de sortie"}`);
     done++;
     ctx.setProgress(done, cells.length, `Synthèses : ${done}/${cells.length} — ${ctx.costUsd().toFixed(2)} $ équiv.`);

@@ -1,10 +1,13 @@
 import { NextRequest } from "next/server";
 import { launchJob, JOB_KINDS, type JobKind } from "@/lib/pipeline";
 import { listJobs, cancelJob, reapOrphanJobs } from "@/lib/jobs";
+import { assertAdmin } from "@/lib/auth";
 
 let reaped = false;
 
 export async function GET() {
+  const denied = await assertAdmin();
+  if (denied) return denied;
   if (!reaped) {
     reapOrphanJobs();
     reaped = true;
@@ -13,6 +16,8 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const denied = await assertAdmin();
+  if (denied) return denied;
   const body = (await req.json()) as { kind?: string; params?: Record<string, unknown>; budgetUsd?: number };
   if (!body.kind || !(body.kind in JOB_KINDS)) return Response.json({ error: "kind invalide" }, { status: 400 });
   const r = launchJob(body.kind as JobKind, body.params, body.budgetUsd);
@@ -20,6 +25,8 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  const denied = await assertAdmin();
+  if (denied) return denied;
   const id = req.nextUrl.searchParams.get("id");
   if (!id) return Response.json({ error: "id manquant" }, { status: 400 });
   cancelJob(id);

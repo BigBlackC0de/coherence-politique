@@ -8,11 +8,27 @@ import * as schema from "./schema";
 export type Db = BetterSQLite3Database<typeof schema>;
 
 declare global {
-  var __apollonDb: { db: Db; sqlite: Database.Database } | undefined;
+  var __coherenceDb: { db: Db; sqlite: Database.Database } | undefined;
+}
+
+export function dbPath(): string {
+  return process.env.COHERENCE_DB_PATH ?? path.join(process.cwd(), "data", "coherence.db");
+}
+
+/** Ferme la connexion partagée (remplacement du fichier par la publication). */
+export function closeDb() {
+  if (globalThis.__coherenceDb) {
+    try {
+      globalThis.__coherenceDb.sqlite.close();
+    } catch {
+      /* déjà fermée */
+    }
+    globalThis.__coherenceDb = undefined;
+  }
 }
 
 function open(): { db: Db; sqlite: Database.Database } {
-  const file = process.env.APOLLON_DB_PATH ?? path.join(process.cwd(), "data", "apollon.db");
+  const file = dbPath();
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const sqlite = new Database(file);
   sqlite.pragma("journal_mode = WAL");
@@ -28,13 +44,13 @@ function open(): { db: Db; sqlite: Database.Database } {
 }
 
 export function getDb(): Db {
-  if (!globalThis.__apollonDb) globalThis.__apollonDb = open();
-  return globalThis.__apollonDb.db;
+  if (!globalThis.__coherenceDb) globalThis.__coherenceDb = open();
+  return globalThis.__coherenceDb.db;
 }
 
 export function getSqlite(): Database.Database {
   getDb();
-  return globalThis.__apollonDb!.sqlite;
+  return globalThis.__coherenceDb!.sqlite;
 }
 
 export { schema };

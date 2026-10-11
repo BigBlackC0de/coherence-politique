@@ -24,14 +24,27 @@ const running = new Map<string, Promise<void>>();
 export class JobCancelled extends Error {}
 export class BudgetExceeded extends Error {}
 
+/** Annule un job. S'il tourne dans un autre processus (CLI), la demande passe par la base et ce processus l'applique à son prochain point de contrôle. */
 export function cancelJob(id: string) {
   cancelFlags.set(id, true);
+  if (!running.has(id)) getDb().update(schema.jobs).set({ status: "cancel-requested" }).where(eq(schema.jobs.id, id)).run();
+}
+
+/** Le processus existe-t-il encore ? (signal 0 : simple test, n'envoie rien) */
+function processAlive(pid: number | null): boolean {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "EPERM";
+  }
 }
 
 export function isJobRunning(kind: string): boolean {
   const db = getDb();
-  const r = db.select().from(schema.jobs).where(eq(schema.jobs.status, "running")).all();
-  return r.some((j) => j.kind === kind);
+  const r = db.select().from(schema.jobs).where(eq(schema.jobs.kind, kind)).all();
+  return r.some((j) => (j.status === "running" || j.status === "cancel-requested") && (running.has(j.id) || processAlive(j.pid)));
 }
 
 export function listJobs(limit = 30) {
@@ -45,14 +58,15 @@ export function getJob(id: string) {
 export function startJob(kind: string, fn: (ctx: JobContext) => Promise<void>, opts?: { budgetUsd?: number }): string {
   const db = getDb();
   const id = `${kind}-${Date.now().toString(36)}`;
-  const budgetUsd = opts?.budgetUsd ?? Number(process.env.APOLLON_BUDGET_PER_JOB_USD ?? 25);
+  const budgetUsd = opts?.budgetUsd ?? Number(process.env.COHERENCE_BUDGET_PER_JOB_USD ?? 25);
   db.insert(schema.jobs)
-    .values({ id, kind, status: "running", startedAt: nowIso(), message: "Démarrage…" })
+    .values({ id, kind, status: "running", startedAt: nowIso(), message: "Démarrage…", pid: process.pid })
     .run();
 
   let logBuf = "";
   let cost = 0;
   let lastFlush = 0;
+  let lastCancelCheck = 0;
   const state = { progress: 0, total: 0, message: "", in: 0, out: 0, cache: 0 };
 
   const flush = (force = false) => {
@@ -98,6 +112,11 @@ export function startJob(kind: string, fn: (ctx: JobContext) => Promise<void>, o
       flush();
     },
     checkpoint: () => {
+      // Annulation demandée depuis un autre processus (interface admin) : vérifiée toutes les 5 s au plus.
+      if (Date.now() - lastCancelCheck > 5000) {
+        lastCancelCheck = Date.now();
+        if (getJob(id)?.status === "cancel-requested") cancelFlags.set(id, true);
+      }
       if (cancelFlags.get(id)) throw new JobCancelled("Job annulé par l'utilisateur");
       if (cost > budgetUsd) throw new BudgetExceeded(`Budget du job dépassé (${cost.toFixed(2)} $ > ${budgetUsd} $)`);
     },
@@ -131,12 +150,12 @@ export async function waitJob(id: string) {
   return getJob(id);
 }
 
-/** Au démarrage : les jobs "running" d'un process précédent sont orphelins. */
+/** Les jobs « en cours » dont le processus n'existe plus (serveur redémarré, CLI tué) sont orphelins. */
 export function reapOrphanJobs() {
   const db = getDb();
-  const orphans = db.select().from(schema.jobs).where(eq(schema.jobs.status, "running")).all();
+  const orphans = db.select().from(schema.jobs).all().filter((j) => j.status === "running" || j.status === "cancel-requested");
   for (const j of orphans) {
-    if (!running.has(j.id)) {
+    if (!running.has(j.id) && !processAlive(j.pid)) {
       db.update(schema.jobs).set({ status: "error", message: "Interrompu (redémarrage du serveur)", finishedAt: nowIso() }).where(eq(schema.jobs.id, j.id)).run();
     }
   }

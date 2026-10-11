@@ -1,10 +1,13 @@
 import { NextRequest } from "next/server";
 import type Anthropic from "@anthropic-ai/sdk";
 import { ask } from "@/lib/claude/ask";
+import { assertAdmin } from "@/lib/auth";
 
 export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
+  const denied = await assertAdmin();
+  if (denied) return denied;
   const body = (await req.json()) as { question?: string; history?: { role: "user" | "assistant"; content: string }[] };
   if (!body.question?.trim()) return Response.json({ error: "question vide" }, { status: 400 });
   try {

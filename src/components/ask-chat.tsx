@@ -48,7 +48,7 @@ export function AskChat() {
       {messages.length === 0 && (
         <div className="grid md:grid-cols-2 gap-2">
           {SUGGESTIONS.map((s) => (
-            <button key={s} onClick={() => send(s)} className="card p-3 text-left text-sm hover:border-accent">
+            <button key={s} onClick={() => send(s)} className="card card-hover p-3 text-left text-sm">
               {s}
             </button>
           ))}
@@ -57,8 +57,8 @@ export function AskChat() {
       <div className="space-y-3">
         {messages.map((m, i) => (
           <div key={i} className={`card p-4 ${m.role === "user" ? "bg-surface-2" : ""}`}>
-            <div className="text-[11px] uppercase tracking-wide text-ink-3 mb-1">{m.role === "user" ? "Vous" : "Apollon"}</div>
-            {m.role === "assistant" ? <div className="prose-apollon text-sm" dangerouslySetInnerHTML={{ __html: marked.parse(m.content) as string }} /> : <p className="text-sm whitespace-pre-wrap">{m.content}</p>}
+            <div className="text-[11px] uppercase tracking-wide text-ink-3 mb-1">{m.role === "user" ? "Vous" : "Cohérence-Politique"}</div>
+            {m.role === "assistant" ? <div className="prose-chat text-sm" dangerouslySetInnerHTML={{ __html: marked.parse(m.content) as string }} /> : <p className="text-sm whitespace-pre-wrap">{m.content}</p>}
             {m.tools && m.tools.length > 0 && (
               <details className="mt-2 text-xs text-ink-3">
                 <summary className="cursor-pointer">
@@ -75,7 +75,7 @@ export function AskChat() {
             )}
           </div>
         ))}
-        {busy && <div className="card p-4 text-sm text-ink-3 animate-pulse">Apollon consulte les scrutins…</div>}
+        {busy && <div className="card p-4 text-sm text-ink-3 animate-pulse">Cohérence-Politique consulte les scrutins…</div>}
         <div ref={bottom} />
       </div>
       <form
@@ -85,8 +85,8 @@ export function AskChat() {
         }}
         className="flex gap-2 sticky bottom-4"
       >
-        <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Posez une question sur un parti, un vote, un thème…" className="flex-1 border border-border rounded-md px-3 py-2 bg-surface text-sm shadow" disabled={busy} />
-        <button className="rounded-md bg-ink text-bg px-4 py-2 text-sm" disabled={busy}>
+        <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Posez une question sur un parti, un vote, un thème…" className="input flex-1 !py-2.5 shadow" disabled={busy} />
+        <button className="btn-primary" disabled={busy}>
           Demander
         </button>
       </form>

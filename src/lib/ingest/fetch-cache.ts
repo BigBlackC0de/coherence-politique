@@ -22,7 +22,7 @@ export async function fetchCached(url: string, opts?: { maxAgeHours?: number; lo
     }
   }
   opts?.log?.(`Téléchargement ${url} …`);
-  const res = await fetch(url, { headers: { "user-agent": "Apollon/0.1 (+analyse politique citoyenne)" } });
+  const res = await fetch(url, { headers: { "user-agent": "Coherence-Politique/0.1 (+analyse politique citoyenne)" } });
   if (!res.ok) throw new Error(`HTTP ${res.status} sur ${url}`);
   const buf = Buffer.from(await res.arrayBuffer());
   fs.writeFileSync(file, buf);

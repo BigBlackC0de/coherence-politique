@@ -1,116 +1,504 @@
 @import "tailwindcss";
 
+/* ------------------------------------------------------------------ */
+/* Jetons de design — gris doux, un accent chaleureux, formes rondes   */
+/* ------------------------------------------------------------------ */
 :root {
-  --bg: #f7f6f2;
+  --bg: #f6f7f9;
+  --bg-2: #eef0f4;
   --surface: #ffffff;
-  --surface-2: #f1efe9;
-  --border: #e4e1d8;
-  --ink: #1c1b18;
-  --ink-2: #4f4c45;
-  --ink-3: #8b877d;
-  --accent: #b8860b;
-  --accent-ink: #7a5a06;
-  --left: #c0392b;
-  --right: #1f5fa8;
-  --neutral: #a6a39b;
-  --good: #2e7d32;
-  --warn: #c77800;
-  --bad: #b3261e;
+  --surface-2: #f1f3f6;
+  --surface-3: #e6e9ee;
+  --border: #e1e4ea;
+  --border-2: #c9ced8;
+  --ink: #0f1115;
+  --ink-2: #4a515c;
+  --ink-3: #8a909a;
+  /* Identité monochrome, comme le logo : l'accent est l'encre elle-même. */
+  --accent: #0f1115;
+  --accent-ink: #0f1115;
+  --accent-soft: #eceef2;
+  --on-accent: #ffffff;
+  --left: #d6453d;
+  --right: #3d6fd8;
+  --neutral: #a7adb7;
+  --good: #2f9e68;
+  --warn: #e0960c;
+  --bad: #d64545;
+  /* Repères Programme / Votes / Discours (palette catégorielle validée, 3 teintes, clair) */
+  --src-programme: #4a3aa7;
+  --src-votes: #1baf7a;
+  --src-discours: #eb6834;
+  --shadow: 0 1px 2px rgb(15 17 21 / 0.04), 0 10px 30px -14px rgb(15 17 21 / 0.14);
+  --shadow-lg: 0 2px 6px rgb(15 17 21 / 0.05), 0 28px 56px -28px rgb(15 17 21 / 0.28);
+  --radius: 20px;
+  --radius-sm: 12px;
   color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --bg: #0e1013;
+  --bg-2: #13161a;
+  --surface: #171a1f;
+  --surface-2: #1e2228;
+  --surface-3: #272c33;
+  --border: #2a2f37;
+  --border-2: #3b414b;
+  --ink: #eef0f3;
+  --ink-2: #b6bcc6;
+  --ink-3: #7d848f;
+  --accent: #eef0f3;
+  --accent-ink: #eef0f3;
+  --accent-soft: #22262d;
+  --on-accent: #0e1013;
+  --left: #ef5f57;
+  --right: #6a93ea;
+  --neutral: #6a7079;
+  --good: #4fc287;
+  --warn: #f0b03a;
+  --bad: #f06060;
+  /* Repères Programme / Votes / Discours (mêmes teintes, pas choisis pour le fond sombre) */
+  --src-programme: #9085e9;
+  --src-votes: #199e70;
+  --src-discours: #d95926;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 10px 30px -14px rgb(0 0 0 / 0.6);
+  --shadow-lg: 0 2px 6px rgb(0 0 0 / 0.5), 0 28px 56px -28px rgb(0 0 0 / 0.8);
+  color-scheme: dark;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #121311;
-    --surface: #1b1c19;
-    --surface-2: #232420;
-    --border: #2f302b;
-    --ink: #ecebe6;
-    --ink-2: #bdbab0;
-    --ink-3: #807d74;
-    --accent: #e0b43a;
-    --accent-ink: #f0cf6a;
-    --left: #e2574a;
-    --right: #5b93d9;
-    --neutral: #6f6c64;
-    --good: #66bb6a;
-    --warn: #ffb74d;
-    --bad: #ef5350;
+    --bg: #0e1013;
+    --bg-2: #13161a;
+    --surface: #171a1f;
+    --surface-2: #1e2228;
+    --surface-3: #272c33;
+    --border: #2a2f37;
+    --border-2: #3b414b;
+    --ink: #eef0f3;
+    --ink-2: #b6bcc6;
+    --ink-3: #7d848f;
+    --accent: #eef0f3;
+    --accent-ink: #eef0f3;
+    --accent-soft: #22262d;
+    --on-accent: #0e1013;
+    --left: #ef5f57;
+    --right: #6a93ea;
+    --neutral: #6a7079;
+    --good: #4fc287;
+    --warn: #f0b03a;
+    --bad: #f06060;
+  /* Repères Programme / Votes / Discours (mêmes teintes, pas choisis pour le fond sombre) */
+  --src-programme: #9085e9;
+  --src-votes: #199e70;
+  --src-discours: #d95926;
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 10px 30px -14px rgb(0 0 0 / 0.6);
+    --shadow-lg: 0 2px 6px rgb(0 0 0 / 0.5), 0 28px 56px -28px rgb(0 0 0 / 0.8);
     color-scheme: dark;
   }
 }
 
 @theme inline {
   --color-bg: var(--bg);
+  --color-bg-2: var(--bg-2);
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
   --color-border: var(--border);
+  --color-border-2: var(--border-2);
   --color-ink: var(--ink);
   --color-ink-2: var(--ink-2);
   --color-ink-3: var(--ink-3);
   --color-accent: var(--accent);
   --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-on-accent: var(--on-accent);
   --color-left: var(--left);
   --color-right: var(--right);
   --color-neutral: var(--neutral);
   --color-good: var(--good);
   --color-warn: var(--warn);
   --color-bad: var(--bad);
-  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --color-src-programme: var(--src-programme);
+  --color-src-votes: var(--src-votes);
+  --color-src-discours: var(--src-discours);
+  --font-sans: var(--font-mona), system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+/* ------------------------------------------------------------------ */
+/* Base                                                                */
+/* ------------------------------------------------------------------ */
+html {
+  scroll-behavior: smooth;
+  font-size: 16px;
+}
 html,
 body {
   background: var(--bg);
   color: var(--ink);
 }
-
+body {
+  font-feature-settings: "ss01", "cv01";
+  text-rendering: optimizeLegibility;
+  line-height: 1.5;
+}
+h1,
+h2,
+h3 {
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+h1 {
+  font-stretch: 105%;
+}
 a {
   text-underline-offset: 3px;
 }
+::selection {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
 
+/* ------------------------------------------------------------------ */
+/* Composants                                                          */
+/* ------------------------------------------------------------------ */
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.card-hover {
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    border-color 0.18s ease;
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--border-2);
+}
+.card-soft {
+  background: var(--surface-2);
+  border-radius: var(--radius);
 }
 
-.prose-apollon p {
+.eyebrow {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--accent-ink);
+}
+
+.input {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 999px;
+  padding: 0.6rem 1rem;
+  font-size: 0.95rem;
+  color: var(--ink);
+  transition: border-color 0.15s;
+}
+.input:hover {
+  border-color: var(--border-2);
+}
+.input:focus {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+textarea.input {
+  border-radius: var(--radius-sm);
+}
+select.input {
+  padding-right: 2rem;
+}
+
+.btn-primary,
+.btn-secondary,
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border-radius: 999px;
+  padding: 0.65rem 1.15rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.2;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    transform 0.1s,
+    box-shadow 0.15s;
+  white-space: nowrap;
+}
+.btn-primary {
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: 0 6px 18px -8px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+.btn-primary:hover {
+  background: color-mix(in srgb, var(--accent) 88%, black);
+}
+.btn-primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.btn-secondary {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--ink);
+}
+.btn-secondary:hover {
+  border-color: var(--border-2);
+  background: var(--surface-2);
+}
+.btn-ghost {
+  color: var(--ink-2);
+}
+.btn-ghost:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+.btn-primary:active,
+.btn-secondary:active {
+  transform: translateY(1px);
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 0.3rem 0.8rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink-2);
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+.pill:hover {
+  border-color: var(--border-2);
+  background: var(--surface-2);
+}
+.pill-active {
+  background: var(--ink);
+  color: var(--bg);
+  border-color: var(--ink);
+}
+.pill-active:hover {
+  background: var(--ink);
+}
+/* Case à cocher dans une pilule (sélecteur de partis) : la pilule passe en « active ». */
+.pill:has(input:checked) {
+  background: var(--ink);
+  color: var(--bg);
+  border-color: var(--ink);
+}
+
+.table {
+  width: 100%;
+  font-size: 0.9rem;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+.table th {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 700;
+  text-align: left;
+  padding: 0.6rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  position: sticky;
+  top: 0;
+}
+.table td {
+  padding: 0.65rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+.table tbody tr:hover td {
+  background: var(--surface-2);
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Bulles d'aide */
+.help-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--ink-3);
+  vertical-align: middle;
+  margin-left: 0.25rem;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+.help-dot:hover,
+.help-dot[aria-expanded="true"] {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.help-term {
+  text-decoration: underline dotted var(--accent);
+  text-underline-offset: 3px;
+  text-decoration-thickness: 2px;
+  cursor: help;
+  font: inherit;
+  color: inherit;
+}
+.help-pop {
+  position: absolute;
+  z-index: 40;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translate(-50%, 4px);
+  width: min(300px, 86vw);
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-lg);
+  padding: 0.75rem 0.9rem;
+  font-size: 0.82rem;
+  font-weight: 400;
+  text-align: left;
+  line-height: 1.45;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.15s,
+    transform 0.15s;
+}
+.help-pop-open {
+  opacity: 1;
+  transform: translate(-50%, 0);
+  pointer-events: auto;
+}
+/* Sur téléphone, la bulle s'ouvre en bas de l'écran : jamais coupée, jamais de défilement horizontal. */
+@media (max-width: 640px) {
+  .help-pop {
+    position: fixed;
+    left: 16px;
+    right: 16px;
+    bottom: 16px;
+    width: auto;
+    transform: none;
+  }
+  .help-pop-open {
+    transform: none;
+  }
+}
+
+/* Fondu de défilement pour la navigation horizontale */
+.scroll-fade {
+  mask-image: linear-gradient(90deg, transparent, #000 12px, #000 calc(100% - 24px), transparent);
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.rise {
+  animation: rise 0.4s ease both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rise,
+  .card-hover,
+  .help-pop {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* Recharts : textes et infobulles aux couleurs du thème */
+.recharts-text {
+  fill: var(--ink-3);
+  font-size: 11px;
+}
+.recharts-cartesian-grid line {
+  stroke: var(--border);
+}
+.recharts-tooltip-cursor {
+  fill: color-mix(in srgb, var(--ink) 6%, transparent) !important;
+}
+.chart-tooltip {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  padding: 0.55rem 0.8rem;
+  font-size: 0.8rem;
+  color: var(--ink);
+}
+
+/* Contenu Markdown du chat */
+.prose-chat p {
   margin: 0.5rem 0;
 }
-.prose-apollon ul {
+.prose-chat ul {
   list-style: disc;
   padding-left: 1.25rem;
   margin: 0.5rem 0;
 }
-.prose-apollon ol {
+.prose-chat ol {
   list-style: decimal;
   padding-left: 1.25rem;
 }
-.prose-apollon h1,
-.prose-apollon h2,
-.prose-apollon h3 {
+.prose-chat h1,
+.prose-chat h2,
+.prose-chat h3 {
   font-weight: 600;
   margin: 0.9rem 0 0.4rem;
 }
-.prose-apollon strong {
+.prose-chat strong {
   font-weight: 600;
 }
-.prose-apollon code {
+.prose-chat code {
   font-family: var(--font-mono);
   font-size: 0.85em;
   background: var(--surface-2);
   padding: 0 0.3em;
   border-radius: 4px;
 }
-.prose-apollon table {
+.prose-chat table {
   border-collapse: collapse;
   margin: 0.5rem 0;
   font-size: 0.9em;
 }
-.prose-apollon th,
-.prose-apollon td {
+.prose-chat th,
+.prose-chat td {
   border: 1px solid var(--border);
   padding: 0.25rem 0.5rem;
 }

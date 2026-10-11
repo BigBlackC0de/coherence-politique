@@ -2,6 +2,7 @@ import { unzipSync, strFromU8 } from "fflate";
 import { getDb, getSqlite, nowIso, schema } from "../db";
 import { partyForAnGroup, partyForParpol } from "../config/parties";
 import { fetchCached } from "./fetch-cache";
+import { majorityPosition } from "./group-position";
 import type { JobContext } from "../jobs";
 
 /**
@@ -10,7 +11,7 @@ import type { JobContext } from "../jobs";
  *  - Scrutins : tous les scrutins publics de la législature, votes nominatifs
  */
 
-export const AN_LEGISLATURE = process.env.APOLLON_AN_LEGISLATURE ?? "17";
+export const AN_LEGISLATURE = process.env.COHERENCE_AN_LEGISLATURE ?? "17";
 const BASE = `https://data.assemblee-nationale.fr/static/openData/repository/${AN_LEGISLATURE}`;
 export const AN_URLS = {
   deputes: `${BASE}/amo/deputes_actifs_mandats_actifs_organes/AMO10_deputes_actifs_mandats_actifs_organes.json.zip`,
@@ -87,11 +88,12 @@ export async function ingestAnDeputes(ctx: JobContext) {
   // Acteurs
   let n = 0;
   const upsert = getSqlite().prepare(
-    `INSERT INTO politicians (id, chamber, first_name, last_name, full_name, party_id, group_ref, group_abbrev, group_name, parpol, department, circo, role, active, hatvp_url)
-     VALUES (@id,'AN',@firstName,@lastName,@fullName,@partyId,@groupRef,@groupAbbrev,@groupName,@parpol,@department,@circo,@role,1,@hatvpUrl)
-     ON CONFLICT(id) DO UPDATE SET first_name=excluded.first_name, last_name=excluded.last_name, full_name=excluded.full_name, party_id=excluded.party_id, group_ref=excluded.group_ref, group_abbrev=excluded.group_abbrev, group_name=excluded.group_name, parpol=excluded.parpol, department=excluded.department, circo=excluded.circo, role=excluded.role, active=1, hatvp_url=excluded.hatvp_url`,
+    `INSERT INTO politicians (id, chamber, first_name, last_name, full_name, party_id, group_ref, group_abbrev, group_name, parpol, department, circo, role, active, mandate_start, mandate_end, hatvp_url)
+     VALUES (@id,'AN',@firstName,@lastName,@fullName,@partyId,@groupRef,@groupAbbrev,@groupName,@parpol,@department,@circo,@role,1,@mandateStart,NULL,@hatvpUrl)
+     ON CONFLICT(id) DO UPDATE SET first_name=excluded.first_name, last_name=excluded.last_name, full_name=excluded.full_name, party_id=excluded.party_id, group_ref=excluded.group_ref, group_abbrev=excluded.group_abbrev, group_name=excluded.group_name, parpol=excluded.parpol, department=excluded.department, circo=excluded.circo, role=excluded.role, active=1, mandate_start=excluded.mandate_start, mandate_end=NULL, hatvp_url=excluded.hatvp_url`,
   );
 
+  const seenIds: string[] = [];
   const tx = getSqlite().transaction(() => {
     for (const [name, json] of files) {
       if (!name.includes("/acteur/")) continue;
@@ -124,10 +126,22 @@ export async function ingestAnDeputes(ctx: JobContext) {
         department: str(lieu.departement),
         circo: str(lieu.numCirco),
         role: str(quality),
+        mandateStart: (str(asn.dateDebut) ?? "").slice(0, 10) || null,
         hatvpUrl: str(a.uri_hatvp),
       });
+      seenIds.push(str(a.uid) ?? "");
       n++;
     }
+    // Députés absents du dump « actifs » : mandat terminé (ministre, démission, décès, suppléant redevenu simple citoyen).
+    // On garde leurs votes mais on les sort des effectifs et des classements ; la fin de mandat est approchée par leur dernier vote.
+    const gone = getSqlite()
+      .prepare(`SELECT id FROM politicians WHERE chamber = 'AN' AND active = 1 AND id NOT IN (${seenIds.map(() => "?").join(",")})`)
+      .all(...seenIds) as { id: string }[];
+    const close = getSqlite().prepare(
+      `UPDATE politicians SET active = 0, mandate_end = COALESCE(mandate_end, (SELECT MAX(s.date) FROM votes v JOIN scrutins s ON s.uid = v.scrutin_uid WHERE v.politician_id = politicians.id), date('now')) WHERE id = ?`,
+    );
+    for (const g of gone) close.run(g.id);
+    if (gone.length) ctx.log(`${gone.length} anciens députés passés en « mandat terminé »`);
   });
   tx();
   ctx.log(`${n} députés en exercice importés`);
@@ -207,7 +221,7 @@ export async function ingestAnScrutins(ctx: JobContext) {
           groupRef: gRef,
           groupAbbrev: meta?.abbrev ?? null,
           partyId: meta?.partyId ?? null,
-          position: str(vote.positionMajoritaire),
+          position: majorityPosition(num(dv.pour), num(dv.contre), num(dv.abstentions)),
           pour: num(dv.pour),
           contre: num(dv.contre),
           abstentions: num(dv.abstentions),

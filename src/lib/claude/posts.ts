@@ -1,10 +1,11 @@
 import { sql, eq, inArray, desc } from "drizzle-orm";
 import { getDb, getSqlite, nowIso, schema } from "../db";
 import { themesPromptBlock, THEME_BY_ID } from "../config/themes";
-import { APOLLON_PERSONA, pMap } from "./client";
+import { ANALYST_PERSONA, pMap } from "./client";
 import { llm, modelFor, engine } from "../llm";
 import { PostBatchOutput, ClaimCheck } from "./schemas";
 import { getUserByUsername, getUserTweets, getSetting, setSetting } from "../x/client";
+import { KIND_LABEL, KIND_PRIORITY } from "../ingest/cri-an";
 import type { JobContext } from "../jobs";
 
 /* ------------------------------------------------------------------ */
@@ -91,43 +92,67 @@ export function importPosts(items: { id?: string; handle: string; text: string; 
 /* Analyse des tweets                                                  */
 /* ------------------------------------------------------------------ */
 
-const SYSTEM_POSTS = `${APOLLON_PERSONA}
+const SYSTEM_POSTS = `${ANALYST_PERSONA}
 
-Tâche : analyser des messages publiés sur X par des responsables ou partis politiques français.
+Tâche : analyser des prises de parole de responsables ou partis politiques français : interventions en séance publique (questions au gouvernement, explications de vote, discussions générales, débats), communiqués officiels, messages publiés sur X.
 
 TAXONOMIE DES THÈMES (axes orientés de -1 à +1) :
 ${themesPromptBlock()}
 
-Pour chaque message :
-- is_political : false pour les messages personnels, vœux, sport, etc.
+Pour chaque prise de parole :
+- is_political : false pour les messages personnels, vœux, sport, hommages, etc.
 - tone : factuel / attaque (contre un adversaire) / promesse / emotion / autopromotion / autre.
-- themes : 0 à 3 thèmes avec la stance exprimée (-1 à +1) sur l'axe du thème. N'attribue une stance que si le message prend position.
+- themes : 0 à 3 thèmes avec la stance exprimée (-1 à +1) sur l'axe du thème. N'attribue une stance que si l'orateur prend position (une question au gouvernement prend position par ce qu'elle réclame ou dénonce).
 - claims : jusqu'à 3 affirmations vérifiables, reformulées de façon neutre. kind="vote-revendique" quand l'auteur affirme avoir voté / s'être opposé à quelque chose ("nous avons voté contre…", "nous sommes les seuls à avoir…"). checkable=true si des votes parlementaires ou un programme pourraient confirmer ou infirmer.
 Réponds uniquement avec le JSON demandé.`;
 
-const BATCH = 30;
+/** Taille d'un lot : bornée en nombre et en caractères (les interventions en séance sont longues). */
+const BATCH_MAX_ITEMS = 25;
+const BATCH_MAX_CHARS = 36_000;
+const ITEM_MAX_CHARS = 3_000;
+const DEFAULT_LIMIT = 500;
 
 export async function analyzePosts(ctx: JobContext, opts?: { limit?: number }) {
   const db = getDb();
-  const pending = db
-    .select({ id: schema.posts.id, handle: schema.posts.handle, text: schema.posts.text, createdAt: schema.posts.createdAt, partyId: schema.posts.partyId })
-    .from(schema.posts)
-    .where(sql`${schema.posts.id} NOT IN (SELECT post_id FROM post_analyses)`)
-    .orderBy(desc(schema.posts.createdAt))
-    .limit(opts?.limit ?? 100000)
-    .all();
+  const sqlite = getSqlite();
+  const limit = opts?.limit ?? DEFAULT_LIMIT;
+  const priority = `CASE kind ${Object.entries(KIND_PRIORITY)
+    .map(([k, v]) => `WHEN '${k}' THEN ${v}`)
+    .join(" ")} ELSE 0 END`;
+  const pendingTotal = (sqlite.prepare(`SELECT COUNT(*) n FROM posts WHERE id NOT IN (SELECT post_id FROM post_analyses)`).get() as { n: number }).n;
+  const pending = sqlite
+    .prepare(`SELECT id, handle, text, created_at AS createdAt, party_id AS partyId, kind, title FROM posts WHERE id NOT IN (SELECT post_id FROM post_analyses) ORDER BY ${priority} DESC, created_at DESC LIMIT ?`)
+    .all(limit) as { id: string; handle: string; text: string; createdAt: string; partyId: string | null; kind: string; title: string | null }[];
   const model = modelFor("bulk");
-  ctx.log(`${pending.length} tweets à analyser (${engine()}, ${model})`);
+  ctx.log(`${pendingTotal} prises de parole non analysées ; ${pending.length} traitées dans ce passage (priorité : questions au gouvernement, explications de vote, communiqués ; ${engine()}, ${model})`);
   if (!pending.length) return;
   const parties = new Map(db.select().from(schema.parties).all().map((p) => [p.id, p.name]));
-  const batches: typeof pending[] = [];
-  for (let i = 0; i < pending.length; i += BATCH) batches.push(pending.slice(i, i + BATCH));
+  const batches: (typeof pending)[] = [];
+  let cur: typeof pending = [];
+  let curChars = 0;
+  for (const p of pending) {
+    const len = Math.min(p.text.length, ITEM_MAX_CHARS) + 200;
+    if (cur.length && (cur.length >= BATCH_MAX_ITEMS || curChars + len > BATCH_MAX_CHARS)) {
+      batches.push(cur);
+      cur = [];
+      curChars = 0;
+    }
+    cur.push(p);
+    curChars += len;
+  }
+  if (cur.length) batches.push(cur);
   let done = 0;
   ctx.setProgress(0, pending.length);
   await pMap(batches, engine() === "claude-code" ? 2 : 4, async (batch) => {
     ctx.checkpoint();
-    const text = batch.map((p) => `### ${p.id}\nAuteur : @${p.handle}${p.partyId ? ` (${parties.get(p.partyId)})` : ""} — ${p.createdAt.slice(0, 10)}\n${p.text}`).join("\n\n");
-    const res = await llm({ task: "analyze-posts", system: SYSTEM_POSTS, prompt: `Analyse ces ${batch.length} messages. Réponds pour chaque id.\n\n${text}`, schema: PostBatchOutput, model: "bulk", effort: "medium", ctx });
+    const text = batch
+      .map((p) => {
+        const body = p.text.length > ITEM_MAX_CHARS ? `${p.text.slice(0, ITEM_MAX_CHARS)} […]` : p.text;
+        const who = p.kind === "tweet" ? `@${p.handle}` : p.handle;
+        return `### ${p.id}\nAuteur : ${who}${p.partyId ? ` (${parties.get(p.partyId)})` : ""} — ${KIND_LABEL[p.kind] ?? p.kind} — ${p.createdAt.slice(0, 10)}${p.title ? `\nContexte : ${p.title}` : ""}\n${body}`;
+      })
+      .join("\n\n");
+    const res = await llm({ task: "analyze-posts", system: SYSTEM_POSTS, prompt: `Analyse ces ${batch.length} prises de parole. Réponds pour chaque id.\n\n${text}`, schema: PostBatchOutput, model: "bulk", effort: "medium", ctx });
     if (!res.output) {
       ctx.log(`Lot ignoré : ${res.error ?? "sortie vide"}`);
       return;
@@ -149,25 +174,27 @@ export async function analyzePosts(ctx: JobContext, opts?: { limit?: number }) {
       db.insert(schema.postAnalyses).values(rows).run();
     }
     done += batch.length;
-    ctx.setProgress(done, pending.length, `Tweets analysés : ${done}/${pending.length} — ${ctx.costUsd().toFixed(2)} $ équiv.`);
+    ctx.setProgress(done, pending.length, `Prises de parole analysées : ${done}/${pending.length} — ${ctx.costUsd().toFixed(2)} $ équiv.`);
   });
+  const left = pendingTotal - pending.length;
+  if (left > 0) ctx.log(`${left} prises de parole restent à analyser : relancez le job (ou augmentez la limite).`);
 }
 
 /* ------------------------------------------------------------------ */
 /* Vérification des affirmations contre les votes                      */
 /* ------------------------------------------------------------------ */
 
-const SYSTEM_CLAIMS = `${APOLLON_PERSONA}
+const SYSTEM_CLAIMS = `${ANALYST_PERSONA}
 
 Tâche : vérifier une affirmation politique à partir des votes parlementaires fournis. Sois strict : "confirme" seulement si les votes le montrent clairement, "inverifiable" si les preuves fournies ne permettent pas de conclure. Réponds uniquement avec le JSON demandé.`;
 
 export async function checkClaims(ctx: JobContext, opts?: { limit?: number }) {
   const db = getDb();
   const sqlite = getSqlite();
-  type Row = { postId: string; claims: string; partyId: string | null; handle: string; createdAt: string; text: string };
+  type Row = { postId: string; claims: string; partyId: string | null; handle: string; createdAt: string; text: string; kind: string; title: string | null };
   const rows = sqlite
     .prepare(
-      `SELECT pa.post_id AS postId, pa.claims, p.party_id AS partyId, p.handle, p.created_at AS createdAt, p.text
+      `SELECT pa.post_id AS postId, pa.claims, p.party_id AS partyId, p.handle, p.created_at AS createdAt, p.text, p.kind, p.title
        FROM post_analyses pa JOIN posts p ON p.id = pa.post_id
        WHERE pa.claims != '[]' AND pa.post_id NOT IN (SELECT post_id FROM claim_checks)
        ORDER BY p.created_at DESC LIMIT ?`,
@@ -198,9 +225,9 @@ export async function checkClaims(ctx: JobContext, opts?: { limit?: number }) {
     const context = evidence
       .map((e) => `- [${e.uid}] ${e.date} ${e.chamber} — ${e.summary} (importance ${e.salience}) — position du groupe ${party?.shortName ?? "?"} : ${e.position ?? "absent"} (${e.pour} pour / ${e.contre} contre / ${e.abstentions} abst.)`)
       .join("\n");
-    const prompt = `Affirmation publiée sur X par @${row.handle}${party ? ` (${party.name})` : ""} le ${row.createdAt.slice(0, 10)} :
+    const prompt = `Affirmation de ${row.kind === "tweet" ? `@${row.handle}` : row.handle}${party ? ` (${party.name})` : ""}, ${(KIND_LABEL[row.kind] ?? row.kind).toLowerCase()} du ${row.createdAt.slice(0, 10)}${row.title ? ` (${row.title})` : ""} :
 « ${claim.claim} »
-Message original : « ${row.text} »
+Texte original : « ${row.text.slice(0, 3000)} »
 
 Thème : ${theme.label} (axe -1 = ${theme.poleLeft} ; +1 = ${theme.poleRight}).
 ${score?.votedStance != null ? `Position VOTÉE du parti sur ce thème (calculée sur ${score.votedN} votes de groupe) : ${score.votedStance.toFixed(2)}.` : ""}

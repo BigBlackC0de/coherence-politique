@@ -1,24 +1,52 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Mona_Sans } from "next/font/google";
 import "./globals.css";
 import { Nav } from "@/components/nav";
+import { isAdmin, adminMode } from "@/lib/auth";
+import { SITE_DESCRIPTION, SITE_NAME, SITE_TAGLINE } from "@/lib/config/site";
 
-const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
-const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
+const mona = Mona_Sans({ variable: "--font-mona", subsets: ["latin", "latin-ext"], axes: ["wdth"] });
 
 export const metadata: Metadata = {
-  title: "Apollon — ce que les partis disent, ce qu'ils votent",
-  description: "Analyse indépendante des partis politiques français : programmes, votes au Parlement et prises de parole, confrontés par Claude.",
+  title: { default: `${SITE_NAME} — ${SITE_TAGLINE}`, template: `%s · ${SITE_NAME}` },
+  description: SITE_DESCRIPTION,
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export const dynamic = "force-dynamic";
+
+/** Applique le thème mémorisé avant le premier rendu pour éviter le flash clair/sombre. */
+const THEME_SCRIPT = `(function(){try{var t=localStorage.getItem('coherence-theme');if(t==='light'||t==='dark'){document.documentElement.dataset.theme=t;}}catch(e){}})();`;
+
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  const admin = await isAdmin();
+  const mode = adminMode();
   return (
-    <html lang="fr" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
+    <html lang="fr" className={`${mona.variable} h-full antialiased`} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
       <body className="min-h-full flex flex-col font-sans">
-        <Nav />
-        <main className="mx-auto w-full max-w-7xl px-4 py-6 flex-1">{children}</main>
-        <footer className="border-t border-border text-xs text-ink-3 px-4 py-4 text-center">
-          Sources : open data de l&apos;Assemblée nationale, NosParlementaires (data.senat.fr), sites officiels des partis, X. Analyse par Claude (Anthropic). Les positions sont des estimations documentées, pas des vérités — vérifiez toujours les preuves citées.
+        <Nav admin={admin} canLogin={mode === "token"} />
+        <main className="mx-auto w-full max-w-[1440px] px-4 sm:px-6 lg:px-10 py-6 md:py-10 flex-1">{children}</main>
+        <footer className="border-t border-border mt-12 bg-surface">
+          <div className="mx-auto max-w-[1440px] px-4 sm:px-6 lg:px-10 py-8 grid gap-4 md:grid-cols-[1fr_auto] text-sm text-ink-3">
+            <p className="max-w-3xl leading-relaxed">
+              {SITE_NAME} est un site citoyen indépendant, sans parti pris : la même méthode pour tous les partis. Les données viennent de sources officielles (Assemblée nationale, Sénat, sites des partis). Les textes sont lus avec l&apos;aide d&apos;une intelligence artificielle, qui peut se tromper. C&apos;est pourquoi chaque chiffre renvoie aux votes qui le justifient : vérifiez-les.
+            </p>
+            <p className="md:text-right">
+              <a href="/comprendre" className="hover:underline font-medium text-ink-2">
+                Comment ça marche ?
+              </a>
+              {mode === "token" && !admin && (
+                <>
+                  {" · "}
+                  <a href="/admin" className="hover:underline">
+                    connexion
+                  </a>
+                </>
+              )}
+            </p>
+          </div>
         </footer>
       </body>
     </html>

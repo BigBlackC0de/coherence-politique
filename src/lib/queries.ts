@@ -3,7 +3,23 @@ import { getDb, getSqlite, schema } from "./db";
 import { THEMES } from "./config/themes";
 import { compassFromScores } from "./analysis/scores";
 
-/** Lectures pour les pages (Server Components). */
+/**
+ * Lectures pour les pages (Server Components).
+ *
+ * Attention : `getSqlite().prepare(...).all()` renvoie les colonnes sous leur nom SQL (snake_case)
+ * et les colonnes JSON sous forme de chaîne. Toute requête brute typée avec un `$inferSelect`
+ * (camelCase, JSON déjà parsé) doit donc aliaser chaque colonne (`party_id AS partyId`) et
+ * parser le JSON ; ne jamais typer un `SELECT x.*` brut comme `$inferSelect`.
+ */
+
+function parseJson<T>(v: string | null | undefined, fallback: T): T {
+  if (v == null) return fallback;
+  try {
+    return JSON.parse(v) as T;
+  } catch {
+    return fallback;
+  }
+}
 
 export function allParties() {
   return getDb().select().from(schema.parties).orderBy(schema.parties.lrIndex).all();
@@ -84,9 +100,15 @@ export function partyDetail(id: string) {
   if (!party) return null;
   const scores = db.select().from(schema.partyThemeScores).where(eq(schema.partyThemeScores.partyId, id)).all();
   const docs = db.select().from(schema.documents).where(eq(schema.documents.partyId, id)).all();
-  const docAnalyses = s
-    .prepare(`SELECT da.*, d.title AS doc_title, d.url AS doc_url FROM document_analyses da JOIN documents d ON d.id = da.document_id WHERE d.party_id = ?`)
-    .all(id) as (typeof schema.documentAnalyses.$inferSelect & { doc_title: string; doc_url: string | null; measures: string; quotes: string })[];
+  // Alias explicites : better-sqlite3 renvoie les noms de colonnes tels quels (snake_case).
+  const docAnalyses = (
+    s
+      .prepare(
+        `SELECT da.document_id AS documentId, da.theme, da.stance, da.confidence, da.summary, da.measures, da.quotes, da.model, da.analyzed_at AS analyzedAt, d.title AS doc_title, d.url AS doc_url
+         FROM document_analyses da JOIN documents d ON d.id = da.document_id WHERE d.party_id = ?`,
+      )
+      .all(id) as (Omit<typeof schema.documentAnalyses.$inferSelect, "measures" | "quotes"> & { doc_title: string; doc_url: string | null; measures: string; quotes: string })[]
+  ).map((r) => ({ ...r, measures: parseJson<string[]>(r.measures, []), quotes: parseJson<string[]>(r.quotes, []) }));
   const members = db.select().from(schema.politicians).where(and(eq(schema.politicians.partyId, id), eq(schema.politicians.active, true))).orderBy(schema.politicians.lastName).all();
   const recentVotes = s
     .prepare(
@@ -96,11 +118,20 @@ export function partyDetail(id: string) {
     )
     .all(id) as { uid: string; date: string; chamber: string; title: string; sort: string | null; summary: string | null; salience: number | null; theme: string | null; position: string; pour: number; contre: number; abstentions: number }[];
   const posts = s
-    .prepare(`SELECT p.*, pa.themes AS a_themes, pa.tone, pa.claims FROM posts p LEFT JOIN post_analyses pa ON pa.post_id = p.id WHERE p.party_id = ? ORDER BY p.created_at DESC LIMIT 30`)
+    .prepare(
+      `SELECT p.id, p.handle, p.party_id AS partyId, p.politician_id AS politicianId, p.kind, p.title, p.chamber, p.source_ref AS sourceRef, p.text, p.created_at AS createdAt, p.url,
+              p.likes, p.reposts, p.replies, p.views, p.source, p.ingested_at AS ingestedAt, pa.themes AS a_themes, pa.tone, pa.claims
+       FROM posts p LEFT JOIN post_analyses pa ON pa.post_id = p.id WHERE p.party_id = ? ORDER BY p.created_at DESC LIMIT 30`,
+    )
     .all(id) as (typeof schema.posts.$inferSelect & { a_themes: string | null; tone: string | null; claims: string | null })[];
-  const claims = s
-    .prepare(`SELECT c.*, p.handle, p.url AS post_url, p.created_at FROM claim_checks c JOIN posts p ON p.id = c.post_id WHERE p.party_id = ? ORDER BY c.checked_at DESC LIMIT 30`)
-    .all(id) as (typeof schema.claimChecks.$inferSelect & { handle: string; post_url: string | null; created_at: string; evidence: string })[];
+  const claims = (
+    s
+      .prepare(
+        `SELECT c.id, c.post_id AS postId, c.claim, c.theme, c.verdict, c.explanation, c.evidence, c.model, c.checked_at AS checkedAt, p.handle, p.kind, p.url AS post_url, p.created_at
+         FROM claim_checks c JOIN posts p ON p.id = c.post_id WHERE p.party_id = ? ORDER BY c.checked_at DESC LIMIT 30`,
+      )
+      .all(id) as (Omit<typeof schema.claimChecks.$inferSelect, "evidence"> & { handle: string; kind: string; post_url: string | null; created_at: string; evidence: string })[]
+  ).map((r) => ({ ...r, evidence: parseJson<(typeof schema.claimChecks.$inferSelect)["evidence"]>(r.evidence, []) }));
   const summaries = s.prepare(`SELECT key, value FROM settings WHERE key LIKE 'doc-summary:%'`).all() as { key: string; value: string }[];
   return { party, scores, docs, docAnalyses, members, recentVotes, posts, claims, docSummaries: Object.fromEntries(summaries.map((r) => [r.key.split(":")[1], JSON.parse(r.value) as { period: string; summary: string }])) };
 }
@@ -108,8 +139,8 @@ export function partyDetail(id: string) {
 export function themeDetail(themeId: string) {
   const s = getSqlite();
   const rows = s
-    .prepare(`SELECT p.id, p.name, p.short_name, p.color, p.lr_index, sc.* FROM parties p LEFT JOIN party_theme_scores sc ON sc.party_id = p.id AND sc.theme = ? ORDER BY p.lr_index`)
-    .all(themeId) as (typeof schema.partyThemeScores.$inferSelect & { id: string; name: string; short_name: string; color: string; lr_index: number; evidence: string | null })[];
+    .prepare(`SELECT p.id, p.name, p.short_name, p.color, p.lr_index, sc.party_id AS partyId, sc.theme, sc.declared_stance AS declaredStance, sc.declared_confidence AS declaredConfidence, sc.voted_stance AS votedStance, sc.voted_n AS votedN, sc.voted_weight AS votedWeight, sc.senat_stance AS senatStance, sc.senat_n AS senatN, sc.posts_stance AS postsStance, sc.posts_n AS postsN, sc.gap, sc.narrative, sc.evidence, sc.verdict, sc.updated_at AS updatedAt FROM parties p LEFT JOIN party_theme_scores sc ON sc.party_id = p.id AND sc.theme = ? ORDER BY p.lr_index`)
+    .all(themeId) as (Omit<typeof schema.partyThemeScores.$inferSelect, "evidence"> & { id: string; name: string; short_name: string; color: string; lr_index: number; evidence: string | null })[];
   const scrutins = s
     .prepare(
       `SELECT s.uid, s.date, s.chamber, s.title, s.sort, a.summary, a.salience, a.themes FROM scrutin_analyses a JOIN scrutins s ON s.uid = a.scrutin_uid
@@ -118,12 +149,12 @@ export function themeDetail(themeId: string) {
     .all(themeId, `%"${themeId}"%`) as { uid: string; date: string; chamber: string; title: string; sort: string | null; summary: string; salience: number; themes: string }[];
   const gv = s.prepare(`SELECT party_id, position FROM group_votes WHERE scrutin_uid = ? AND party_id IS NOT NULL`);
   return {
-    parties: rows,
+    parties: rows.map((r) => ({ ...r, evidence: r.evidence ? parseJson<NonNullable<(typeof schema.partyThemeScores.$inferSelect)["evidence"]>>(r.evidence, []) : null })),
     scrutins: scrutins.map((sc) => ({ ...sc, direction: (JSON.parse(sc.themes) as { theme: string; direction: number }[]).find((t) => t.theme === themeId)?.direction ?? 0, positions: Object.fromEntries((gv.all(sc.uid) as { party_id: string; position: string | null }[]).map((g) => [g.party_id, g.position])) })),
   };
 }
 
-export function listScrutins(opts: { q?: string; theme?: string; chamber?: string; page?: number; party?: string; position?: string; minSalience?: number }) {
+export function listScrutins(opts: { q?: string; theme?: string; chamber?: string; page?: number; party?: string; position?: string; minSalience?: number; explained?: boolean }) {
   const s = getSqlite();
   const conds: string[] = ["1=1"];
   const params: unknown[] = [];
@@ -143,6 +174,7 @@ export function listScrutins(opts: { q?: string; theme?: string; chamber?: strin
     conds.push("COALESCE(a.salience,0) >= ?");
     params.push(opts.minSalience);
   }
+  if (opts.explained) conds.push("EXISTS (SELECT 1 FROM scrutin_debates d WHERE d.scrutin_uid = s.uid AND d.explanation IS NOT NULL)");
   if (opts.party) {
     conds.push("EXISTS (SELECT 1 FROM group_votes g WHERE g.scrutin_uid = s.uid AND g.party_id = ?" + (opts.position ? " AND g.position = ?" : "") + ")");
     params.push(opts.party);
@@ -154,10 +186,10 @@ export function listScrutins(opts: { q?: string; theme?: string; chamber?: strin
   const total = (s.prepare(`SELECT COUNT(*) n FROM scrutins s LEFT JOIN scrutin_analyses a ON a.scrutin_uid = s.uid WHERE ${where}`).get(...params) as { n: number }).n;
   const rows = s
     .prepare(
-      `SELECT s.uid, s.date, s.chamber, s.title, s.sort, s.pour, s.contre, s.abstentions, a.summary, a.salience, a.primary_theme AS theme, a.is_procedural AS procedural
+      `SELECT s.uid, s.date, s.chamber, s.title, s.sort, s.pour, s.contre, s.abstentions, a.summary, a.stakes, a.salience, a.primary_theme AS theme, a.is_procedural AS procedural
        FROM scrutins s LEFT JOIN scrutin_analyses a ON a.scrutin_uid = s.uid WHERE ${where} ORDER BY s.date DESC, s.uid DESC LIMIT ? OFFSET ?`,
     )
-    .all(...params, PAGE, (page - 1) * PAGE) as { uid: string; date: string; chamber: string; title: string; sort: string | null; pour: number; contre: number; abstentions: number; summary: string | null; salience: number | null; theme: string | null; procedural: number | null }[];
+    .all(...params, PAGE, (page - 1) * PAGE) as { uid: string; date: string; chamber: string; title: string; sort: string | null; pour: number; contre: number; abstentions: number; summary: string | null; stakes: string | null; salience: number | null; theme: string | null; procedural: number | null }[];
   const gv = s.prepare(`SELECT party_id, group_abbrev, position FROM group_votes WHERE scrutin_uid = ?`);
   return { total, page, pageSize: PAGE, rows: rows.map((r) => ({ ...r, groups: gv.all(r.uid) as { party_id: string | null; group_abbrev: string | null; position: string | null }[] })) };
 }
@@ -169,7 +201,7 @@ export function scrutinDetail(uid: string) {
   if (!scrutin) return null;
   const analysis = db.select().from(schema.scrutinAnalyses).where(eq(schema.scrutinAnalyses.scrutinUid, uid)).get();
   const groups = s
-    .prepare(`SELECT gv.*, g.name AS group_name, p.name AS party_name, p.color, p.lr_index FROM group_votes gv LEFT JOIN an_groups g ON g.ref = gv.group_ref LEFT JOIN parties p ON p.id = gv.party_id WHERE gv.scrutin_uid = ? ORDER BY COALESCE(p.lr_index, 999)`)
+    .prepare(`SELECT gv.scrutin_uid AS scrutinUid, gv.group_ref AS groupRef, gv.group_abbrev AS groupAbbrev, gv.party_id AS partyId, gv.position, gv.pour, gv.contre, gv.abstentions, gv.non_votants AS nonVotants, gv.members, g.name AS group_name, p.name AS party_name, p.color, p.lr_index FROM group_votes gv LEFT JOIN an_groups g ON g.ref = gv.group_ref LEFT JOIN parties p ON p.id = gv.party_id WHERE gv.scrutin_uid = ? ORDER BY COALESCE(p.lr_index, 999)`)
     .all(uid) as (typeof schema.groupVotes.$inferSelect & { group_name: string | null; party_name: string | null; color: string | null; lr_index: number | null })[];
   const votes = s
     .prepare(`SELECT v.position, v.par_delegation, p.id, p.full_name, p.group_abbrev, p.party_id, p.department FROM votes v JOIN politicians p ON p.id = v.politician_id WHERE v.scrutin_uid = ? ORDER BY p.group_abbrev, p.last_name`)
@@ -209,13 +241,39 @@ export function searchPoliticians(q: string, limit = 50) {
   if (!words.length) return [];
   const conds = words.map(() => "(full_name LIKE ? OR department LIKE ?)").join(" AND ");
   const params = words.flatMap((w) => [`%${w}%`, `%${w}%`]);
-  return s.prepare(`SELECT p.*, pa.color, pa.short_name FROM politicians p LEFT JOIN parties pa ON pa.id = p.party_id WHERE active=1 AND ${conds} ORDER BY chamber, last_name LIMIT ?`).all(...params, limit) as (typeof schema.politicians.$inferSelect & { color: string | null; short_name: string | null })[];
+  return s
+    .prepare(
+      `SELECT p.id, p.chamber, p.first_name AS firstName, p.last_name AS lastName, p.full_name AS fullName, p.party_id AS partyId, p.group_abbrev AS groupAbbrev, p.department, pa.color, pa.short_name
+       FROM politicians p LEFT JOIN parties pa ON pa.id = p.party_id WHERE active=1 AND ${conds} ORDER BY chamber, last_name LIMIT ?`,
+    )
+    .all(...params, limit) as { id: string; chamber: string; firstName: string; lastName: string; fullName: string; partyId: string | null; groupAbbrev: string | null; department: string | null; color: string | null; short_name: string | null }[];
 }
 
 export function themeStats() {
   const s = getSqlite();
   const rows = s.prepare(`SELECT primary_theme theme, COUNT(*) n, SUM(CASE WHEN salience>=4 THEN 1 ELSE 0 END) major FROM scrutin_analyses WHERE is_procedural=0 AND primary_theme IS NOT NULL GROUP BY primary_theme`).all() as { theme: string; n: number; major: number }[];
   return THEMES.map((t) => ({ ...t, n: rows.find((r) => r.theme === t.id)?.n ?? 0, major: rows.find((r) => r.theme === t.id)?.major ?? 0 }));
+}
+
+/** Sièges par parti (membres en exercice), pour les hémicycles. Les élus hors partis suivis sont regroupés. */
+export function seatCounts(chamber: "AN" | "SENAT") {
+  const s = getSqlite();
+  const rows = s
+    .prepare(`SELECT p.party_id AS partyId, pa.short_name AS shortName, pa.name, pa.color, pa.lr_index AS lrIndex, COUNT(*) n FROM politicians p LEFT JOIN parties pa ON pa.id = p.party_id WHERE p.chamber = ? AND p.active = 1 GROUP BY p.party_id ORDER BY COALESCE(pa.lr_index, 999)`)
+    .all(chamber) as { partyId: string | null; shortName: string | null; name: string | null; color: string | null; lrIndex: number | null; n: number }[];
+  const known = rows.filter((r) => r.partyId);
+  const other = rows.filter((r) => !r.partyId).reduce((a, r) => a + r.n, 0);
+  return {
+    total: rows.reduce((a, r) => a + r.n, 0),
+    slices: [...known.map((r) => ({ id: r.partyId!, name: r.shortName!, hint: r.name!, color: r.color!, value: r.n })), ...(other ? [{ name: "Autres / non rattachés", hint: "groupes ou élus hors des 11 partis suivis", color: "var(--neutral)", value: other }] : [])],
+  };
+}
+
+/** Répartition des verdicts dire / faire (toutes cellules parti × thème synthétisées). */
+export function verdictCounts(partyId?: string) {
+  const s = getSqlite();
+  const rows = (partyId ? s.prepare(`SELECT verdict, COUNT(*) n FROM party_theme_scores WHERE verdict IS NOT NULL AND party_id = ? GROUP BY verdict`).all(partyId) : s.prepare(`SELECT verdict, COUNT(*) n FROM party_theme_scores WHERE verdict IS NOT NULL GROUP BY verdict`).all()) as { verdict: string; n: number }[];
+  return Object.fromEntries(rows.map((r) => [r.verdict, r.n])) as Record<string, number>;
 }
 
 export function usageByTask() {

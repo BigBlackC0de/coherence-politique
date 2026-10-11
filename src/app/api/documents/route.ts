@@ -1,8 +1,11 @@
 import { NextRequest } from "next/server";
 import { addManualDocument } from "@/lib/claude/programmes";
 import { getParty } from "@/lib/queries";
+import { assertAdmin } from "@/lib/auth";
 
 export async function POST(req: NextRequest) {
+  const denied = await assertAdmin();
+  if (denied) return denied;
   const b = (await req.json()) as { partyId?: string; title?: string; url?: string; text?: string; kind?: string };
   if (!b.partyId || !getParty(b.partyId)) return Response.json({ error: "parti inconnu" }, { status: 400 });
   if (!b.title) return Response.json({ error: "titre requis" }, { status: 400 });

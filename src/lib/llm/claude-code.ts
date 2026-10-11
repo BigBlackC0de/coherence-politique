@@ -5,7 +5,7 @@ import type { JobContext } from "../jobs";
 import { JobCancelled } from "../jobs";
 
 /**
- * Moteur « Claude Code » : Apollon pilote le binaire officiel `claude` en mode
+ * Moteur « Claude Code » : Cohérence-Politique pilote le binaire officiel `claude` en mode
  * non interactif (`claude -p`). Les appels sont couverts par l'abonnement
  * Claude (Pro/Max) du compte connecté avec `claude auth login`, dans la limite
  * des quotas d'usage de l'abonnement. Aucune facturation à l'acte.
@@ -42,10 +42,10 @@ export interface CcResult {
 
 let binCache: string | null = null;
 
-/** Localise l'exécutable `claude` (APOLLON_CLAUDE_BIN, sinon PATH). */
+/** Localise l'exécutable `claude` (COHERENCE_CLAUDE_BIN, sinon PATH). */
 export function claudeBin(): string | null {
   if (binCache) return binCache;
-  if (process.env.APOLLON_CLAUDE_BIN && fs.existsSync(process.env.APOLLON_CLAUDE_BIN)) return (binCache = process.env.APOLLON_CLAUDE_BIN);
+  if (process.env.COHERENCE_CLAUDE_BIN && fs.existsSync(process.env.COHERENCE_CLAUDE_BIN)) return (binCache = process.env.COHERENCE_CLAUDE_BIN);
   const names = process.platform === "win32" ? ["claude.exe", "claude.cmd", "claude"] : ["claude"];
   for (const dir of (process.env.PATH ?? "").split(path.delimiter)) {
     for (const n of names) {
@@ -89,7 +89,7 @@ interface StreamLine {
 
 async function runOnce(req: CcRequest): Promise<CcResult> {
   const bin = claudeBin();
-  if (!bin) throw new Error("Exécutable `claude` introuvable : installez Claude Code et connectez-vous (`claude auth login`), ou définissez APOLLON_CLAUDE_BIN.");
+  if (!bin) throw new Error("Exécutable `claude` introuvable : installez Claude Code et connectez-vous (`claude auth login`), ou définissez COHERENCE_CLAUDE_BIN.");
   const args = [
     "-p",
     "--output-format",
@@ -139,6 +139,7 @@ async function runOnce(req: CcRequest): Promise<CcResult> {
       const toolCalls: CcResult["toolCalls"] = [];
       let final: StreamLine | null = null;
       let modelSeen = req.model;
+      const assistantTexts: string[] = [];
       for (const line of out.split(/\r?\n/)) {
         if (!line.trim().startsWith("{")) continue;
         let j: StreamLine;
@@ -148,7 +149,10 @@ async function runOnce(req: CcRequest): Promise<CcResult> {
           continue;
         }
         if (j.type === "assistant" && j.message?.content) {
-          for (const b of j.message.content) if (b.type === "tool_use") toolCalls.push({ name: b.name ?? "?", input: b.input });
+          for (const b of j.message.content) {
+            if (b.type === "tool_use") toolCalls.push({ name: b.name ?? "?", input: b.input });
+            else if (b.type === "text" && b.text?.trim()) assistantTexts.push(b.text.trim());
+          }
         }
         if (j.type === "result") final = j;
       }
@@ -167,7 +171,14 @@ async function runOnce(req: CcRequest): Promise<CcResult> {
         cache_read_input_tokens: u.cache_read_input_tokens ?? 0,
         cache_creation_input_tokens: u.cache_creation_input_tokens ?? 0,
       };
-      const text = final.result ?? "";
+      // `result` est le dernier message seulement : si la session se termine par un tour sans texte (recherche web
+      // longue), le dossier rédigé plus tôt est dans les messages précédents. Sans schéma imposé, on les reprend.
+      let text = final.result ?? "";
+      if (!text.trim() && !req.jsonSchema && assistantTexts.length) text = assistantTexts.join("\n\n");
+      if (!text.trim() && !final.is_error && final.subtype === "success" && !final.structured_output) {
+        resolve({ ok: false, text: "", structured: null, costUsd: final.total_cost_usd ?? 0, usage, model: modelSeen, errorKind: "other", errorMessage: `réponse vide du moteur Claude Code (${toolCalls.length} appel(s) d'outils, ${assistantTexts.length} message(s) texte)`, toolCalls });
+        return;
+      }
       if (final.is_error || final.subtype !== "success") {
         const msg = `${text} ${final.error ?? ""} ${err}`.trim();
         let kind: CcResult["errorKind"] = "other";
@@ -187,10 +198,10 @@ async function runOnce(req: CcRequest): Promise<CcResult> {
 /**
  * Exécute un appel, en attendant patiemment si le quota de l'abonnement est
  * atteint (fenêtres de 5 h) : nouvelle tentative toutes les 5 minutes, jusqu'à
- * APOLLON_RATE_WAIT_MAX_MIN (défaut 360).
+ * COHERENCE_RATE_WAIT_MAX_MIN (défaut 360).
  */
 export async function runClaudeCode(req: CcRequest, ctx?: JobContext): Promise<CcResult> {
-  const maxWaitMs = Number(process.env.APOLLON_RATE_WAIT_MAX_MIN ?? 360) * 60_000;
+  const maxWaitMs = Number(process.env.COHERENCE_RATE_WAIT_MAX_MIN ?? 360) * 60_000;
   const started = Date.now();
   for (;;) {
     const r = await runOnce(req);

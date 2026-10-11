@@ -2,7 +2,7 @@ import { getDb, getSqlite, schema } from "../db";
 import { THEMES, THEME_BY_ID } from "../config/themes";
 
 /**
- * Outils d'interrogation de la base Apollon, partagés par :
+ * Outils d'interrogation de la base Cohérence-Politique, partagés par :
  *  - le chat via l'API (tool use natif),
  *  - le serveur MCP (chat via Claude Code).
  */
@@ -16,7 +16,7 @@ export interface ToolDef {
 export const TOOL_DEFS: ToolDef[] = [
   {
     name: "database_status",
-    description: "État de la base Apollon : nombre de députés, sénateurs, scrutins importés et classifiés (total et par thème), programmes analysés, tweets, synthèses, date du dernier scrutin. À appeler pour toute question de volume ou de couverture.",
+    description: "État de la base Cohérence-Politique : nombre de députés, sénateurs, scrutins importés et classifiés (total et par thème), programmes analysés, prises de parole (séances, communiqués), synthèses, date du dernier scrutin. À appeler pour toute question de volume ou de couverture.",
     input_schema: { type: "object", properties: {}, required: [], additionalProperties: false },
   },
   {
@@ -36,7 +36,7 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: "party_positions",
-    description: "Positions d'un parti sur tous les thèmes : déclarée (programme), votée (Assemblée/Sénat), tweets, écart, verdict et synthèse.",
+    description: "Positions d'un parti sur tous les thèmes : déclarée (programme), votée (Assemblée/Sénat), prises de parole, écart, verdict et synthèse.",
     input_schema: { type: "object", properties: { party_id: { type: "string" } }, required: ["party_id"], additionalProperties: false },
   },
   {
@@ -73,8 +73,8 @@ export function runTool(name: string, input: Record<string, unknown>): string {
         scrutins_classifies_par_theme: byTheme,
         dernier_scrutin: (sqlite.prepare(`SELECT MAX(date) d FROM scrutins`).get() as { d: string | null }).d,
         programmes_analyses: one(`SELECT COUNT(*) n FROM documents WHERE status='analyzed'`),
-        tweets_importes: one(`SELECT COUNT(*) n FROM posts`),
-        tweets_analyses: one(`SELECT COUNT(*) n FROM post_analyses`),
+        prises_de_parole_importees: one(`SELECT COUNT(*) n FROM posts`),
+        prises_de_parole_analysees: one(`SELECT COUNT(*) n FROM post_analyses`),
         syntheses: one(`SELECT COUNT(*) n FROM party_theme_scores WHERE narrative IS NOT NULL`),
         note: "La classification est incrémentale : les positions des partis ne reflètent que les scrutins déjà classifiés.",
       });
@@ -123,7 +123,7 @@ export function runTool(name: string, input: Record<string, unknown>): string {
           votee_AN: r.votedStance,
           n_votes: r.votedN,
           votee_Senat: r.senatStance,
-          tweets: r.postsStance,
+          prises_de_parole: r.postsStance,
           ecart: r.gap,
           verdict: r.verdict,
           synthese: r.narrative,
@@ -134,7 +134,7 @@ export function runTool(name: string, input: Record<string, unknown>): string {
     case "theme_overview": {
       const theme = String(input.theme);
       const rows = sqlite.prepare(`SELECT p.name, p.short_name AS short, s.* FROM party_theme_scores s JOIN parties p ON p.id = s.party_id WHERE s.theme = ? ORDER BY p.lr_index`).all(theme) as Record<string, unknown>[];
-      return JSON.stringify({ theme: THEME_BY_ID[theme], partis: rows.map((r) => ({ parti: r.name, declaree: r.declared_stance, votee: r.voted_stance, n: r.voted_n, senat: r.senat_stance, tweets: r.posts_stance, ecart: r.gap, verdict: r.verdict, synthese: r.narrative })) });
+      return JSON.stringify({ theme: THEME_BY_ID[theme], partis: rows.map((r) => ({ parti: r.name, declaree: r.declared_stance, votee: r.voted_stance, n: r.voted_n, senat: r.senat_stance, prises_de_parole: r.posts_stance, ecart: r.gap, verdict: r.verdict, synthese: r.narrative })) });
     }
     case "politician_lookup": {
       const name = String(input.name);
@@ -153,8 +153,9 @@ export function runTool(name: string, input: Record<string, unknown>): string {
     case "programme_extracts": {
       const rows = sqlite
         .prepare(`SELECT d.title, d.url, da.stance, da.confidence, da.summary, da.measures, da.quotes FROM document_analyses da JOIN documents d ON d.id = da.document_id WHERE d.party_id = ? AND da.theme = ?`)
-        .all(String(input.party_id), String(input.theme));
-      return JSON.stringify(rows);
+        .all(String(input.party_id), String(input.theme)) as { measures: string; quotes: string }[];
+      // measures / quotes sont stockées en JSON : on les parse pour ne pas les ré-encoder en chaîne échappée.
+      return JSON.stringify(rows.map((r) => ({ ...r, measures: JSON.parse(r.measures) as string[], quotes: JSON.parse(r.quotes) as string[] })));
     }
     default:
       return JSON.stringify({ error: `outil inconnu ${name}` });

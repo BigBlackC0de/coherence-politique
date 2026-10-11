@@ -44,7 +44,7 @@ export function buildAuthorizeUrl(): { url: string; state: string } {
   const state = crypto.randomBytes(16).toString("hex");
   setSetting("x:pkce_verifier", verifier);
   setSetting("x:oauth_state", state);
-  const redirect = `${process.env.APOLLON_BASE_URL ?? "http://localhost:3000"}/api/x/callback`;
+  const redirect = `${process.env.COHERENCE_BASE_URL ?? "http://localhost:3000"}/api/x/callback`;
   const params = new URLSearchParams({
     response_type: "code",
     client_id: clientId,
@@ -61,7 +61,7 @@ export async function exchangeCode(code: string, state: string) {
   if (state !== getSetting("x:oauth_state")) throw new Error("state OAuth invalide");
   const verifier = getSetting("x:pkce_verifier");
   if (!verifier) throw new Error("PKCE verifier absent");
-  const redirect = `${process.env.APOLLON_BASE_URL ?? "http://localhost:3000"}/api/x/callback`;
+  const redirect = `${process.env.COHERENCE_BASE_URL ?? "http://localhost:3000"}/api/x/callback`;
   const body = new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: redirect, code_verifier: verifier, client_id: process.env.X_CLIENT_ID! });
   const res = await fetch("https://api.x.com/2/oauth2/token", { method: "POST", headers: tokenHeaders(), body });
   const json = (await res.json()) as { access_token?: string; refresh_token?: string; expires_in?: number; error?: string; error_description?: string };

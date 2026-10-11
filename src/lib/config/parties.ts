@@ -1,5 +1,5 @@
 /**
- * Référentiel des partis politiques français suivis par Apollon.
+ * Référentiel des partis politiques français suivis par Cohérence-Politique.
  *
  * Périmètre : partis ayant un poids électoral ou parlementaire réel (groupe à
  * l'Assemblée, ou score national significatif). Les petits partis, le groupe
@@ -28,6 +28,8 @@ export interface PartyConfig {
   parpolNames: string[];
   senatGroups: string[];
   xHandles: string[];
+  /** Flux RSS/Atom officiels (communiqués, actualités). */
+  rssFeeds?: string[];
   leaders: string[];
   notes?: string;
 }
@@ -41,6 +43,7 @@ export const PARTIES: PartyConfig[] = [
     family: "Gauche radicale",
     lrIndex: 8,
     website: "https://lafranceinsoumise.fr",
+    rssFeeds: ["https://lafranceinsoumise.fr/feed"],
     anGroups: ["LFI-NFP"],
     parpolNames: ["La France Insoumise"],
     senatGroups: [],
@@ -70,6 +73,7 @@ export const PARTIES: PartyConfig[] = [
     family: "Gauche",
     lrIndex: 25,
     website: "https://lesecologistes.fr",
+    rssFeeds: ["https://lesecologistes.fr/rss.xml"],
     anGroups: ["ECOS"],
     parpolNames: ["Les Écologistes - EELV"],
     senatGroups: ["GEST"],
@@ -84,6 +88,7 @@ export const PARTIES: PartyConfig[] = [
     family: "Gauche",
     lrIndex: 32,
     website: "https://parti-socialiste.fr",
+    rssFeeds: ["https://parti-socialiste.fr/feed"],
     anGroups: ["SOC"],
     parpolNames: ["Parti socialiste"],
     senatGroups: ["SER", "SOCR"],
@@ -112,6 +117,7 @@ export const PARTIES: PartyConfig[] = [
     family: "Centre",
     lrIndex: 52,
     website: "https://www.mouvementdemocrate.fr",
+    rssFeeds: ["https://www.mouvementdemocrate.fr/rss.xml"],
     anGroups: ["DEM"],
     parpolNames: ["Mouvement Démocrate"],
     senatGroups: ["UC"],
@@ -170,7 +176,7 @@ export const PARTIES: PartyConfig[] = [
     website: "https://rassemblementnational.fr",
     anGroups: ["RN"],
     parpolNames: ["Rassemblement national"],
-    senatGroups: [],
+    senatGroups: ["UNT"], // Union Nationale pour les Territoires : groupe créé le 5 oct. 2026, présidé par Edwige Diaz (RN)
     xHandles: ["RNational_off", "J_Bardella", "MLP_officiel"],
     leaders: ["Jordan Bardella", "Marine Le Pen"],
   },

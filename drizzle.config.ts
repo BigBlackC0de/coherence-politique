@@ -5,6 +5,6 @@ export default defineConfig({
   schema: "./src/lib/db/schema.ts",
   out: "./drizzle",
   dbCredentials: {
-    url: process.env.APOLLON_DB_PATH ?? "./data/apollon.db",
+    url: process.env.COHERENCE_DB_PATH ?? "./data/coherence.db",
   },
 });

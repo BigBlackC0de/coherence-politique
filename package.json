@@ -1,5 +1,5 @@
 {
-  "name": "apollon",
+  "name": "coherence-politique",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -8,9 +8,11 @@
     "start": "next start",
     "lint": "eslint",
     "job": "tsx scripts/cli.ts",
+    "veille": "tsx scripts/veille.ts",
     "db:generate": "drizzle-kit generate",
     "db:studio": "drizzle-kit studio",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "publish": "tsx scripts/publish.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
@@ -18,12 +20,15 @@
     "better-sqlite3": "^13.0.3",
     "dotenv": "^18.0.6",
     "drizzle-orm": "^0.45.3",
+    "fast-xml-parser": "^5.11.2",
     "fflate": "^0.8.3",
     "lucide-react": "^1.52.0",
     "marked": "^18.1.0",
     "next": "16.4.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
+    "recharts": "^3.10.1",
+    "unpdf": "^1.8.1",
     "zod": "^4.6.5"
   },
   "devDependencies": {

@@ -8,6 +8,48 @@
       "when": 1791328923565,
       "tag": "0000_fine_darkhawk",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1791370951888,
+      "tag": "0001_aspiring_meggan",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791407237176,
+      "tag": "0002_wet_bloodaxe",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1791410510500,
+      "tag": "0003_spooky_madripoor",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1791413779005,
+      "tag": "0004_faithful_sir_ram",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1791416029896,
+      "tag": "0005_noisy_rictor",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1791676213896,
+      "tag": "0006_group_position_from_counts",
+      "breakpoints": true
     }
   ]
 }
